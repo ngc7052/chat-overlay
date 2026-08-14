@@ -48,15 +48,20 @@ the text — and the mouse passes straight through.
 
 Settings → **Channels**. Each row has a checkbox: tick to connect, untick to
 disconnect. Any number of channels from either platform run at once and merge
-into one feed; the `GG` / `TW` tag on each line says where a message came from.
+into one feed; the logo on each line says where a message came from.
 
-- **GoodGame** — the name from the URL: `goodgame.ru/`**`annieflowers`** (a
-  numeric stream id works too).
-- **Twitch** — the login name: `twitch.tv/`**`xqc`**.
+Type the channel name exactly as it appears in the site's address bar:
+
+| Platform | Channel page | Type this |
+|---|---|---|
+| GoodGame | `goodgame.ru/`**`somechannel`** | `somechannel` (a numeric stream id also works) |
+| Twitch | `twitch.tv/`**`somechannel`** | `somechannel` |
+
+Names are not case sensitive. The list is saved as soon as you edit it.
 
 ## Emotes
 
-- GoodGame smiles (`:pekaclap:`), animated ones included.
+- GoodGame smiles (the `:name:` tokens), animated ones included.
 - Twitch native emotes.
 - 7TV, BetterTTV and FrankerFaceZ — global plus each channel's own set.
 

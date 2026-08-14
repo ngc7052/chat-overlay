@@ -1,0 +1,355 @@
+:root {
+  --font-size: 16px;
+  --font-weight: 600;
+  --font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --bg: rgba(10, 12, 18, 0);
+  --emote-size: 27px;
+  --badge-size: 18px;
+  --name-weight: var(--font-weight);
+  --fade: 1.2s;
+  --ui-bg: #141a26;
+  --ui-bg-soft: #1d2534;
+  --ui-line: #2c374b;
+  --ui-text: #e6ebf5;
+  --ui-dim: #9aa7bd;
+  --accent: #6f8cff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: #fff;
+  font-family: var(--font-family);
+  cursor: default;
+  user-select: none;
+}
+
+/* ------------------------------------------------------------------ layout */
+
+body { display: flex; flex-direction: column; }
+
+#bar {
+  /* Above the settings overlay, so the Settings toggle stays reachable and the
+     panel is never a one-exit trap. */
+  position: relative;
+  z-index: 50;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--ui-bg);
+  border-bottom: 1px solid var(--ui-line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+#grip {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 4px;
+  border-radius: 4px;
+  -webkit-app-region: drag;
+  cursor: move;
+}
+#grip:hover { background: var(--ui-bg-soft); }
+#grip-title { flex: 0 0 auto; }
+#status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--ui-dim);
+}
+
+#bar button {
+  -webkit-app-region: no-drag;
+  flex: 0 0 auto;
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+#bar button:hover { border-color: var(--accent); }
+
+#chat {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 8px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
+}
+#chat::-webkit-scrollbar { width: 6px; }
+#chat::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
+#chat::-webkit-scrollbar-track { background: transparent; }
+
+#resize {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 50%, rgba(255,255,255,.55) 50%, rgba(255,255,255,.55) 62%, transparent 62%),
+    linear-gradient(135deg, transparent 72%, rgba(255,255,255,.55) 72%, rgba(255,255,255,.55) 84%, transparent 84%);
+  z-index: 40;
+}
+
+/* Locked = pure overlay: no chrome at all, mouse passes through (main process). */
+body.locked #bar,
+body.locked #resize,
+body.locked #settings { display: none !important; }
+body.locked #chat::-webkit-scrollbar { width: 0; }
+
+/* --------------------------------------------------------------- messages */
+
+.msg {
+  flex: 0 0 auto;
+  font-size: var(--font-size);
+  font-weight: var(--font-weight);
+  line-height: 1.32;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  padding: 1px 3px;
+  border-radius: 4px;
+  animation: pop 140ms ease-out;
+  transition: opacity var(--fade) linear;
+}
+@keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+.msg.fading { opacity: 0; }
+
+body.outline .msg {
+  text-shadow:
+    -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000,
+    0 2px 4px rgba(0, 0, 0, .9);
+}
+
+.msg .ts { color: #9fb0c9; font-weight: 400; margin-right: 5px; font-size: 0.8em; }
+
+.msg .plat {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.66em;
+  font-weight: 800;
+  letter-spacing: .04em;
+  vertical-align: 0.12em;
+  text-shadow: none;
+  color: #fff;
+}
+.plat.gg { background: #5b8def; }
+.plat.tw { background: #9147ff; }
+
+.msg .plat-img {
+  height: var(--badge-size);
+  width: var(--badge-size);
+  vertical-align: -0.15em;
+  margin-right: 5px;
+  object-fit: contain;
+  border-radius: 3px;
+}
+
+.msg .badge {
+  display: inline-block;
+  margin-right: 3px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.64em;
+  font-weight: 800;
+  vertical-align: 0.12em;
+  text-shadow: none;
+  background: #55607a;
+  color: #fff;
+}
+.badge.broadcaster { background: #e63946; }
+.badge.moderator   { background: #2fa84f; }
+.badge.vip         { background: #e05aa8; }
+.badge.subscriber  { background: #6f8cff; }
+.badge.staff       { background: #8b5cf6; }
+.badge.premium     { background: #d9a441; }
+.badge.generic     { background: #55607a; }
+
+.msg .badge-img {
+  height: var(--badge-size);
+  width: var(--badge-size);
+  vertical-align: -0.15em;
+  margin-right: 3px;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+.msg .name { font-weight: var(--name-weight); }
+.msg .colon { opacity: .75; margin-right: 4px; }
+.msg .text { color: #f2f5fb; }
+.msg .url { color: #8ec5ff; text-decoration: underline; text-underline-offset: 2px; }
+.msg .mention { color: #ffd479; font-weight: 800; }
+
+.msg.action .text { font-style: italic; }
+.msg.system { opacity: .78; font-style: italic; font-size: calc(var(--font-size) * .85); }
+.msg.system .text { color: #b9c6dc; }
+.msg.event .text { color: #ffd479; }
+
+.emote {
+  height: var(--emote-size);
+  vertical-align: middle;
+  margin: -2px 1px;
+  object-fit: contain;
+}
+
+/* --------------------------------------------------------------- settings */
+
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* `display: flex` above out-specifies the UA's `[hidden] { display: none }`,
+   so the hidden attribute alone would never actually hide the panel. */
+#settings[hidden] { display: none !important; }
+
+.settings-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--ui-line);
+}
+.settings-head button {
+  background: var(--accent);
+  color: #0d1220;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-head button:hover { filter: brightness(1.12); }
+
+.settings-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 10px 14px;
+  min-width: 0;
+}
+.settings-body section { padding: 8px 0; border-bottom: 1px solid var(--ui-line); }
+.settings-body section:last-child { border-bottom: 0; }
+.settings-body h3 {
+  margin: 2px 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ui-dim);
+}
+
+#settings label { display: block; margin-bottom: 8px; color: var(--ui-text); }
+#settings label.check { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+#settings output { color: var(--accent); font-weight: 700; }
+
+#settings input[type="range"] { width: 100%; margin-top: 4px; accent-color: var(--accent); }
+#settings textarea {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  padding: 6px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  resize: vertical;
+  user-select: text;
+}
+
+#settings input[type="text"],
+#settings select {
+  width: 100%;
+  margin-top: 4px;
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+  user-select: text;
+}
+#settings input[type="checkbox"] { accent-color: var(--accent); }
+
+#settings button.wide {
+  width: 100%;
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  padding: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+#settings button.wide:hover { border-color: var(--accent); }
+#settings button.danger:hover { border-color: #e63946; color: #ff8a93; }
+
+.src-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; min-width: 0; }
+/* Must out-specify the generic `#settings select { width: 100% }` rule, or the
+   dropdown eats the row and pushes the channel name out of sight. */
+#settings .src-row select { width: 106px; margin-top: 0; flex: 0 0 106px; }
+#settings .src-row input[type="text"] { margin-top: 0; flex: 1 1 auto; min-width: 0; width: auto; }
+.src-row input[type="checkbox"] { flex: 0 0 auto; margin: 0; }
+.src-row .dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: #55607a; }
+.src-row .dot.on { background: #2fa84f; }
+.src-row .dot.err { background: #e63946; }
+.src-row button {
+  flex: 0 0 auto;
+  background: var(--ui-bg-soft);
+  color: var(--ui-dim);
+  border: 1px solid var(--ui-line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font: inherit;
+  cursor: pointer;
+}
+.src-row button:hover { color: #ff8a93; border-color: #e63946; }
+
+.hint {
+  color: var(--ui-dim);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+.hint code { background: var(--ui-bg-soft); padding: 0 3px; border-radius: 3px; }

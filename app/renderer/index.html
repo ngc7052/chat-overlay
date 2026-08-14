@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               script-src 'self';
+               style-src 'self';
+               img-src 'self' https: data:;
+               font-src 'self';
+               connect-src wss://chat.goodgame.ru wss://irc-ws.chat.twitch.tv;" />
+<title>ChatOverlay</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body class="locked">
+
+  <div id="bar">
+    <div id="grip">
+      <span id="grip-title">ChatOverlay</span>
+      <span id="status"></span>
+    </div>
+    <button id="btn-settings" title="Settings">Settings</button>
+    <button id="btn-reconnect" title="Reconnect all sources">Reconnect</button>
+    <button id="btn-lock" title="Lock: click-through, hides this bar">Lock</button>
+  </div>
+
+  <div id="chat" aria-live="polite"></div>
+
+  <div id="resize" title="Drag to resize"></div>
+
+  <div id="settings" hidden>
+    <div class="settings-head">
+      <strong>ChatOverlay settings</strong>
+      <button id="btn-settings-close" title="Hide settings and show the chat (Esc)">← Back to chat</button>
+    </div>
+
+    <div class="settings-body">
+
+      <section>
+        <h3>Channels</h3>
+        <div id="sources"></div>
+        <button id="btn-add-source" class="wide">+ Add channel</button>
+        <p class="hint">Tick a row to connect it. GoodGame: the name from the URL (<code>goodgame.ru/<b>annieflowers</b></code>) or its numeric id. Twitch: the login name (<code>twitch.tv/<b>annieflowers</b></code>). Read-only, no login needed.</p>
+      </section>
+
+      <section>
+        <h3>Text</h3>
+        <label>Font
+          <select id="fontPreset">
+            <option value="'Segoe UI', 'Inter', system-ui, sans-serif">Segoe UI (default)</option>
+            <option value="Verdana, sans-serif">Verdana</option>
+            <option value="Tahoma, sans-serif">Tahoma</option>
+            <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+            <option value="Consolas, monospace">Consolas (mono)</option>
+            <option value="'Lucida Console', monospace">Lucida Console (mono)</option>
+            <option value="'Courier New', monospace">Courier New (mono)</option>
+            <option value="Impact, sans-serif">Impact</option>
+            <option value="'Comic Sans MS', cursive">Comic Sans MS</option>
+            <option value="__custom">Custom…</option>
+          </select>
+        </label>
+        <label>Font family (CSS)
+          <input type="text" id="fontFamily" spellcheck="false" placeholder="'My Font', sans-serif" />
+        </label>
+        <label>Font size <output id="out-fontSize"></output>
+          <input type="range" id="fontSize" min="9" max="42" step="1" />
+        </label>
+        <label>Font weight <output id="out-fontWeight"></output>
+          <input type="range" id="fontWeight" min="300" max="800" step="100" />
+        </label>
+        <label>Overall opacity <output id="out-opacity"></output>
+          <input type="range" id="opacity" min="0.2" max="1" step="0.05" />
+        </label>
+        <label>Backdrop <output id="out-bgOpacity"></output>
+          <input type="range" id="bgOpacity" min="0" max="0.9" step="0.05" />
+        </label>
+        <label class="check"><input type="checkbox" id="outline" /> Black outline (readable over any game)</label>
+        <label class="check"><input type="checkbox" id="showTimestamps" /> Show timestamps</label>
+        <label>Platform marker
+          <select id="platformStyle">
+            <option value="icon">Twitch / GoodGame logo</option>
+            <option value="text">Text (TW, GG)</option>
+            <option value="off">Hidden</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" id="boldNames" /> Bold nicknames</label>
+        <label class="check"><input type="checkbox" id="exactColors" /> Exact Twitch nickname colours</label>
+        <label class="check"><input type="checkbox" id="showSystem" /> Show connection messages</label>
+        <p class="hint">Exact colours match the Twitch site exactly. Some users pick very dark colours — keep the black outline on so they stay readable over a game.</p>
+      </section>
+
+      <section>
+        <h3>Badges</h3>
+        <label>Style
+          <select id="badgeStyle">
+            <option value="icons">Real icons (like Twitch)</option>
+            <option value="text">Text labels (MOD, SUB…)</option>
+            <option value="off">Hidden</option>
+          </select>
+        </label>
+        <p class="hint">Twitch badge artwork is fetched per channel, so subscriber tiers and bits show their real icons. GoodGame does not publish badge images — those stay as text labels.</p>
+      </section>
+
+      <section>
+        <h3>Emotes</h3>
+        <label class="check"><input type="checkbox" id="emotes" /> Render emotes</label>
+        <label class="check"><input type="checkbox" id="thirdPartyEmotes" /> 7TV / BTTV / FFZ (Twitch)</label>
+        <label>Emote size <output id="out-emoteScale"></output>
+          <input type="range" id="emoteScale" min="1" max="3" step="0.1" />
+        </label>
+      </section>
+
+      <section>
+        <h3>Feed</h3>
+        <label>Keep last <output id="out-maxMessages"></output> messages
+          <input type="range" id="maxMessages" min="10" max="400" step="10" />
+        </label>
+        <label>Auto-hide after <output id="out-messageLifetime"></output>
+          <input type="range" id="messageLifetime" min="0" max="120" step="5" />
+        </label>
+        <label class="check"><input type="checkbox" id="hideCommands" /> Hide <code>!commands</code></label>
+        <label>Ignore users (comma separated)
+          <input type="text" id="ignoreList" placeholder="botname, spammer" />
+        </label>
+      </section>
+
+      <section>
+        <h3>Custom CSS</h3>
+        <textarea id="customCss" spellcheck="false" rows="6"
+                  placeholder=".msg .name { text-transform: lowercase; }&#10;.msg { letter-spacing: .02em; }"></textarea>
+        <p class="hint" id="css-error" hidden></p>
+        <p class="hint">Applied live. Useful hooks: <code>.msg</code>, <code>.msg .name</code>, <code>.msg .text</code>, <code>.badge</code>, <code>.badge-img</code>, <code>.emote</code>, <code>.plat.tw</code>, <code>.plat.gg</code>, <code>.msg.system</code>.</p>
+      </section>
+
+      <section>
+        <h3>Hotkeys</h3>
+        <label>Lock / unlock <input type="text" id="hotkeyLock" spellcheck="false" /></label>
+        <label>Hide / show <input type="text" id="hotkeyHide" spellcheck="false" /></label>
+        <p class="hint" id="hotkey-warn" hidden></p>
+        <p class="hint">Electron accelerator syntax, e.g. <code>Control+Alt+O</code>, <code>Shift+F8</code>.</p>
+      </section>
+
+      <section>
+        <h3>&nbsp;</h3>
+        <button id="btn-quit" class="wide danger">Quit ChatOverlay</button>
+        <p class="hint">Tray icon (bottom-right of the taskbar) also toggles lock and quits. Overlays only draw over <b>borderless / windowed</b> games — exclusive fullscreen hides every overlay.</p>
+      </section>
+
+    </div>
+  </div>
+
+  <script src="util.js"></script>
+  <script src="emotes.js"></script>
+  <script src="sources.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

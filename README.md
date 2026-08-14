@@ -18,9 +18,9 @@ runtime, which is why it is ~140 MB.
 
 Double-click **`ChatOverlay.exe`**.
 
-On first start it opens **unlocked** with two channels pre-filled and switched
-off — `goodgame.ru/annieflowers` and `twitch.tv/annieflowers`. Open **Settings**
-and tick the ones you want; edit the names to follow any other channel.
+It starts **unlocked** with **Settings** open and no channels — add your own with
+**+ Add channel**, pick GoodGame or Twitch, type the channel name, tick it to
+connect. Your list is saved immediately and restored every time you launch.
 
 Once at least one channel is enabled, press `Ctrl`+`Alt`+`O` to **lock** it: the
 window pins above everything and goes fully click-through, so clicks land on the

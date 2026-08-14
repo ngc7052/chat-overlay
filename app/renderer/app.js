@@ -280,6 +280,7 @@
       src.connect();
     }
     if (sources.length === 0) {
+      const named = config.sources.some((s) => s.channel);
       addMessage({
         id: 'hint:' + Date.now(),
         platform: 'goodgame',
@@ -288,7 +289,12 @@
         userLogin: '',
         color: '#b9c6dc',
         badges: [],
-        parts: [{ type: 'text', value: 'No channel enabled — open Settings and tick one.' }],
+        parts: [{
+          type: 'text',
+          value: named
+            ? 'No channel enabled — open Settings and tick one.'
+            : 'No channels yet — open Settings and add one.',
+        }],
         kind: 'system',
         ts: Date.now(),
       });
@@ -413,6 +419,13 @@
    */
   function renderSourceRows() {
     sourcesEl.textContent = '';
+    if (config.sources.length === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'hint empty';
+      empty.textContent = 'No channels yet. Add one below, then tick it to connect.';
+      sourcesEl.appendChild(empty);
+      return;
+    }
     config.sources.forEach((src, index) => sourcesEl.appendChild(buildSourceRow(src, index)));
     refreshSourceDots();
   }
@@ -572,5 +585,7 @@
     bindSettings();
     renderSourceRows();
     rebuildSources();
+    // Nothing configured yet: put the user straight where channels are added.
+    if (config.sources.length === 0 && !config.locked) showSettings(true);
   });
 })();

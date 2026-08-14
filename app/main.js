@@ -18,12 +18,9 @@ const fs = require('fs');
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'config.json');
 
 const DEFAULT_CONFIG = {
-  // Both platforms are pre-filled but switched off, so a fresh install connects
-  // to nothing until the user ticks a channel in Settings.
-  sources: [
-    { platform: 'goodgame', channel: 'annieflowers', enabled: false },
-    { platform: 'twitch', channel: 'annieflowers', enabled: false },
-  ],
+  // No channels out of the box — the user adds their own, and the list is then
+  // persisted to config.json like every other setting.
+  sources: [],
   bounds: { x: null, y: null, width: 420, height: 620 },
   locked: true,
   hidden: false,
@@ -65,11 +62,11 @@ function loadConfig() {
     const parsed = JSON.parse(raw);
     config = { ...DEFAULT_CONFIG, ...parsed };
     config.bounds = { ...DEFAULT_CONFIG.bounds, ...(parsed.bounds || {}) };
-    if (!Array.isArray(config.sources) || config.sources.length === 0) {
-      config.sources = DEFAULT_CONFIG.sources.map((s) => ({ ...s }));
-    }
+    // An empty list is a legitimate state (fresh install, or the user removed
+    // every channel) — it must never be silently repopulated.
+    if (!Array.isArray(config.sources)) config.sources = [];
   } catch (err) {
-    config = { ...DEFAULT_CONFIG, sources: DEFAULT_CONFIG.sources.map((s) => ({ ...s })) };
+    config = { ...DEFAULT_CONFIG, sources: [] };
   }
 
   // showBadges (boolean) was replaced by badgeStyle ('icons'|'text'|'off').

@@ -19,6 +19,7 @@
       <span id="grip-title">ChatOverlay</span>
       <span id="status"></span>
     </div>
+    <button id="btn-update" title="A new version is available" hidden>Update</button>
     <button id="btn-settings" title="Settings">Settings</button>
     <button id="btn-reconnect" title="Reconnect all sources">Reconnect</button>
     <button id="btn-lock" title="Lock: click-through, hides this bar">Lock</button>
@@ -130,6 +131,15 @@
                   placeholder=".msg .name { text-transform: lowercase; }&#10;.msg { letter-spacing: .02em; }"></textarea>
         <p class="hint" id="css-error" hidden></p>
         <p class="hint">Applied live. Useful hooks: <code>.msg</code>, <code>.msg .name</code>, <code>.msg .text</code>, <code>.badge</code>, <code>.badge-img</code>, <code>.emote</code>, <code>.plat.tw</code>, <code>.plat.gg</code>, <code>.msg.system</code>.</p>
+      </section>
+
+      <section>
+        <h3>Updates</h3>
+        <p class="hint" id="update-status">Version …</p>
+        <label class="check"><input type="checkbox" id="autoCheckUpdates" /> Check for updates automatically</label>
+        <button id="btn-check-update" class="wide">Check now</button>
+        <button id="btn-apply-update" class="wide" hidden>Download and restart</button>
+        <p class="hint">Updates replace only the app itself (about 35 KB), never the bundled runtime. Nothing is downloaded until you click.</p>
       </section>
 
       <section>

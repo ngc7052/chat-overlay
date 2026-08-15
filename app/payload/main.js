@@ -14,6 +14,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const updater = require('./updater');
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'config.json');
 
@@ -47,6 +48,7 @@ const DEFAULT_CONFIG = {
   ignoreList: [],
   hotkeyLock: 'Control+Alt+O',
   hotkeyHide: 'Control+Alt+H',
+  autoCheckUpdates: true,
 };
 
 let config = { ...DEFAULT_CONFIG };
@@ -180,6 +182,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     if (!config.hidden) win.showInactive();
     applyLock();
+    announceUpdate();   // a check may already have finished before this point
   });
 
   const persistBounds = () => {
@@ -328,6 +331,52 @@ ipcMain.handle('window:moveBy', (_e, dx, dy) => {
 
 ipcMain.handle('app:quit', () => app.quit());
 
+/* ----------------------------------------------------------------- updates */
+
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let pendingUpdate = null;   // last check result, when a newer version exists
+
+function announceUpdate() {
+  if (win && !win.isDestroyed() && pendingUpdate) {
+    win.webContents.send('update:available', pendingUpdate);
+  }
+}
+
+async function checkForUpdates(manual) {
+  try {
+    const result = await updater.check();
+    pendingUpdate = result.newer ? result : null;
+    if (pendingUpdate) announceUpdate();
+    else if (manual && win) win.webContents.send('update:none', result);
+    return result;
+  } catch (err) {
+    if (manual && win) win.webContents.send('update:error', err.message);
+    console.warn('update check failed:', err.message);
+    return { error: err.message };
+  }
+}
+
+ipcMain.handle('update:check', () => checkForUpdates(true));
+
+ipcMain.handle('update:apply', async () => {
+  if (!pendingUpdate) throw new Error('nothing to update to');
+  if (!pendingUpdate.url) {
+    // Release carries no payload asset — the runtime itself must have changed.
+    shell.openExternal(pendingUpdate.page || 'https://github.com/ngc7052/chat-overlay/releases/latest');
+    return { manual: true };
+  }
+  const staged = await updater.download(pendingUpdate.url, pendingUpdate.version);
+  return { staged: true, version: staged.version };
+});
+
+ipcMain.handle('update:restart', () => updater.restart());
+
+ipcMain.handle('update:version', () => ({
+  version: updater.currentVersion(),
+  bundled: global.__overlayPayload ? global.__overlayPayload.bundledVersion : null,
+  usingStaged: !!(global.__overlayPayload && global.__overlayPayload.usingStaged),
+}));
+
 ipcMain.handle('shell:open', (_e, url) => {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
 });
@@ -383,6 +432,12 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     registerShortcuts();
+
+    if (config.autoCheckUpdates) {
+      // Give the chat connections the first few seconds to themselves.
+      setTimeout(() => checkForUpdates(false), 8000);
+      setInterval(() => checkForUpdates(false), CHECK_INTERVAL_MS);
+    }
   });
 
   app.on('window-all-closed', () => app.quit());

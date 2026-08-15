@@ -318,7 +318,7 @@
 
   const CHECK_FIELDS = [
     'outline', 'showTimestamps', 'boldNames', 'exactColors',
-    'showSystem', 'emotes', 'thirdPartyEmotes', 'hideCommands',
+    'showSystem', 'emotes', 'thirdPartyEmotes', 'hideCommands', 'autoCheckUpdates',
   ];
 
   function bindSettings() {
@@ -565,6 +565,90 @@
 
   /* ------------------------------------------------------------------ boot */
 
+  /* --------------------------------------------------------------- updates */
+
+  const updateBtn = document.getElementById('btn-update');
+  const updateStatus = document.getElementById('update-status');
+  const applyBtn = document.getElementById('btn-apply-update');
+  const checkBtn = document.getElementById('btn-check-update');
+  let available = null;
+  let busy = false;
+
+  function setUpdateStatus(text) {
+    if (updateStatus) updateStatus.textContent = text;
+  }
+
+  async function refreshVersion(suffix) {
+    const v = await window.overlay.updateVersion();
+    setUpdateStatus('Version ' + v.version + (suffix ? ' — ' + suffix : ''));
+  }
+
+  function offerUpdate(info) {
+    available = info;
+    updateBtn.hidden = false;
+    updateBtn.textContent = 'Update to ' + info.version;
+    applyBtn.hidden = false;
+    setUpdateStatus('Version ' + info.current + ' — v' + info.version + ' available');
+    // Locked users never see the bar, so say it in the feed too.
+    systemLine('Version ' + info.version + ' is available — unlock and click Update.');
+  }
+
+  function systemLine(text) {
+    addMessage({
+      id: 'sys:' + Date.now() + ':' + Math.random().toString(36).slice(2, 7),
+      platform: 'goodgame',
+      channel: '',
+      user: '',
+      userLogin: '',
+      color: '#b9c6dc',
+      badges: [],
+      parts: [{ type: 'text', value: text }],
+      kind: 'system',
+      ts: Date.now(),
+    });
+  }
+
+  async function applyUpdate() {
+    if (busy || !available) return;
+    busy = true;
+    const label = applyBtn.textContent;
+    applyBtn.textContent = 'Downloading…';
+    updateBtn.textContent = 'Downloading…';
+    try {
+      const res = await window.overlay.updateApply();
+      if (res.manual) {
+        setUpdateStatus('This release needs the full download — opened in your browser.');
+        applyBtn.textContent = label;
+        busy = false;
+        return;
+      }
+      setUpdateStatus('v' + res.version + ' ready — restarting…');
+      setTimeout(() => window.overlay.updateRestart(), 600);
+    } catch (err) {
+      setUpdateStatus('Update failed: ' + err.message);
+      systemLine('Update failed: ' + err.message);
+      applyBtn.textContent = label;
+      updateBtn.textContent = 'Update to ' + available.version;
+      busy = false;
+    }
+  }
+
+  updateBtn.addEventListener('click', () => {
+    showSettings(true);
+    applyUpdate();
+  });
+  applyBtn.addEventListener('click', applyUpdate);
+  checkBtn.addEventListener('click', async () => {
+    setUpdateStatus('Checking…');
+    const res = await window.overlay.updateCheck();
+    if (res && res.error) setUpdateStatus('Check failed: ' + res.error);
+    else if (res && !res.newer) setUpdateStatus('Version ' + res.current + ' — up to date');
+  });
+
+  window.overlay.onUpdateAvailable(offerUpdate);
+  window.overlay.onUpdateNone((info) => setUpdateStatus('Version ' + info.current + ' — up to date'));
+  window.overlay.onUpdateError((msg) => setUpdateStatus('Check failed: ' + msg));
+
   window.overlay.onLocked(applyLocked);
   window.overlay.onReconnect(() => { clearAll(); rebuildSources(); });
   window.overlay.onHotkeys((ok) => {
@@ -585,6 +669,7 @@
     bindSettings();
     renderSourceRows();
     rebuildSources();
+    refreshVersion();
     // Nothing configured yet: put the user straight where channels are added.
     if (config.sources.length === 0 && !config.locked) showSettings(true);
   });

@@ -127,6 +127,49 @@ in `app/` (which becomes `resources\app\` inside a build):
 To tweak an existing install, edit `resources\app\` in place and restart the exe
 — no rebuild needed.
 
+## Updates
+
+The app checks GitHub for a newer release on startup and every 6 hours, and
+tells you — it never downloads or changes anything on its own. When one exists
+an **Update** button appears in the top bar (and a line in the chat, since a
+locked overlay has no bar). Clicking it downloads and restarts.
+
+An update is about **35 KB**, not 137 MB: the Electron runtime never changes,
+only the app itself. Turn the checking off in Settings → **Updates**.
+
+### How it stays safe
+
+`boot.js` is the only file an update cannot touch. It picks whichever app
+payload is newest:
+
+| Location | What it is |
+|---|---|
+| `resources\app\payload` | the version that shipped in the zip |
+| `%APPDATA%\ChatOverlay\payload` | a newer one downloaded by the updater |
+
+Because the downloaded payload lands somewhere else entirely, an update never
+overwrites a file the running process has open — the usual reason self-updating
+breaks on Windows.
+
+Every file in the package is SHA-256 checked after it is written, and the swap
+only happens once all of them verify. If a payload fails to start three times —
+or throws immediately — it is quarantined and the bundled version takes over, so
+a broken release cannot brick an install.
+
+### Publishing one
+
+```bash
+# bump app/payload/version.json first
+./build.sh --zip
+gh release create v1.0.1 dist/ChatOverlay.zip dist/app-payload.json.gz \
+  --title "ChatOverlay v1.0.1" --notes "..."
+```
+
+Both assets matter: `ChatOverlay.zip` is for new users, `app-payload.json.gz` is
+what existing installs fetch. A release without the payload asset falls back to
+opening the release page in a browser, which is the right behaviour when the
+Electron runtime itself changed and a full re-download is genuinely needed.
+
 ## Building the portable zip
 
 ```bash

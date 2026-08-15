@@ -35,12 +35,30 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 unzip -q "$CACHE" -d "$OUT"
 
+VERSION="$(python3 -c "import json;print(json.load(open('$ROOT/app/payload/version.json'))['version'])")"
+echo "==> app version $VERSION"
+
 echo "==> installing app"
 mv "$OUT/electron.exe" "$OUT/ChatOverlay.exe"
 rm -rf "$OUT/resources/app"
 mkdir -p "$OUT/resources/app"
 cp -r "$ROOT/app/." "$OUT/resources/app/"
 cp "$ROOT/README.md" "$OUT/README.md"
+
+# Keep the Electron-visible version in step with the payload.
+python3 - "$OUT/resources/app/package.json" "$VERSION" <<'PY'
+import json, sys
+path, version = sys.argv[1], sys.argv[2]
+with open(path) as fh:
+    pkg = json.load(fh)
+pkg["version"] = version
+with open(path, "w") as fh:
+    json.dump(pkg, fh, indent=2)
+    fh.write("\n")
+PY
+
+echo "==> building update manifest"
+python3 "$ROOT/tools/make-payload.py" "$ROOT/app/payload" "$DIST/app-payload.json.gz"
 
 if [ "${1:-}" = "--zip" ]; then
   echo "==> zipping"

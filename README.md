@@ -44,6 +44,15 @@ arrow if Windows hid it).
 While **locked** there is no title bar, no scrollbar and no background — just
 the text — and the mouse passes straight through.
 
+Unlocked, moving the pointer over the window fades a backdrop in so you can see
+its edges to drag and resize, and fades it out again when you leave. Both
+levels are adjustable in Settings → **Text**: *Backdrop while locked* (nothing,
+by default) and *Backdrop on hover, unlocked*.
+
+The bar's buttons are icons: a cog for settings (a back arrow while the panel is
+open), circular arrows to reconnect, and a crossed-out eye to hide the bar and
+turn click-through on.
+
 ## Channels
 
 Settings → **Channels**. Each row has a checkbox: tick to connect, untick to

@@ -325,6 +325,7 @@ const RANGE_FIELDS: [keyof Config, (v: number) => string][] = [
   ['fontWeight', (v) => String(v)],
   ['opacity', (v) => Math.round(v * 100) + '%'],
   ['bgOpacity', (v) => Math.round(v * 100) + '%'],
+  ['hoverBgOpacity', (v) => Math.round(v * 100) + '%'],
   ['emoteScale', (v) => v + '×'],
   ['maxMessages', (v) => String(v)],
   ['messageLifetime', (v) => (v === 0 ? 'never' : v + 's')],
@@ -521,7 +522,9 @@ function buildSourceRow(src: SourceConfig, index: number): HTMLElement {
 
 function showSettings(show: boolean): void {
   settingsEl.hidden = !show;
-  settingsBtn.textContent = show ? 'Back to chat' : 'Settings';
+  // Swaps the cog for a back arrow and marks the button as active.
+  document.body.classList.toggle('settings-open', show);
+  settingsBtn.title = show ? 'Back to chat' : 'Settings';
   if (!show && autoScroll) scrollToBottom();
 }
 

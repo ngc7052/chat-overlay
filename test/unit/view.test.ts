@@ -124,6 +124,14 @@ describe('appearanceVars', () => {
   it('renders the backdrop as an alpha colour', () => {
     expect(appearanceVars(config({ bgOpacity: 0.5 }))['--bg']).toBe('rgba(10, 12, 18, 0.5)');
   });
+
+  it('exposes a second backdrop for the unlocked hover state', () => {
+    // Locked shows only text; hovering while unlocked has to reveal the window
+    // edges, so the two backdrops are independent.
+    const vars = appearanceVars(config({ bgOpacity: 0, hoverBgOpacity: 0.6 }));
+    expect(vars['--bg']).toBe('rgba(10, 12, 18, 0)');
+    expect(vars['--bg-hover']).toBe('rgba(10, 12, 18, 0.6)');
+  });
 });
 
 describe('statusLine', () => {

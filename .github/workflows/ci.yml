@@ -43,6 +43,12 @@ jobs:
       - name: Install
         run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
 
+      - name: Audit dependencies
+        # Advisory: a new CVE in a dev dependency should be visible without
+        # holding up an unrelated pull request. Nothing here ships at runtime.
+        continue-on-error: true
+        run: npm audit --audit-level=high
+
       - name: Test with coverage
         # vitest.config.ts holds the logic modules at 100%; a drop fails here
         # rather than quietly eroding.

@@ -14,6 +14,7 @@ const PROFILE = process.env.OVERLAY_E2E_PROFILE;
 const MEDIA = process.env.OVERLAY_E2E_MEDIA;
 const PREFIX = process.env.OVERLAY_E2E_PREFIX || '';
 const ONLY = process.env.OVERLAY_E2E_ONLY || '';
+const SCENARIO = process.env.OVERLAY_E2E_SCENARIO || '';
 app.setPath('userData', PROFILE);
 
 require(path.join(__dirname, '..', '..', 'app', 'boot.js'));
@@ -57,12 +58,39 @@ const q = (js) => win.webContents.executeJavaScript(js);
  * to be left. Moving the window is the one thing that settles it, and it
  * exercises the real hover rule rather than working around it.
  */
+function covers(bounds, pt) {
+  return pt.x >= bounds.x && pt.x < bounds.x + bounds.width
+    && pt.y >= bounds.y && pt.y < bounds.y + bounds.height;
+}
+
+/**
+ * Move the window, then confirm it actually landed where the pointer needs it.
+ *
+ * A window manager is free to clamp or ignore setPosition, and the cursor can
+ * be anywhere on a multi-monitor desktop, so "I asked for it" is not the same
+ * as "it happened". Verifying here turns a mysterious intermittent hover
+ * failure into a clear one about the window placement.
+ */
+async function placeWindowVerified(where, tries = 8) {
+  for (let i = 0; i < tries; i++) {
+    placeWindow(where);
+    await wait(120);
+    const ok = covers(win.getBounds(), screen.getCursorScreenPoint());
+    if (ok === (where === 'under')) return true;
+  }
+  return false;
+}
+
 function placeWindow(where) {
   const pt = screen.getCursorScreenPoint();
   const area = screen.getDisplayNearestPoint(pt).workArea;
   const [w, h] = win.getSize();
   if (where === 'under') {
-    win.setPosition(Math.round(pt.x - w / 2), Math.round(pt.y - h / 2));
+    // Clamped into the work area, then nudged so the pointer is still inside:
+    // a window shoved back on screen can end up beside the cursor, not under it.
+    const x = Math.min(Math.max(Math.round(pt.x - w / 2), area.x), Math.max(area.x, area.x + area.width - w));
+    const y = Math.min(Math.max(Math.round(pt.y - h / 2), area.y), Math.max(area.y, area.y + area.height - h));
+    win.setPosition(x, y);
   } else {
     // The first placement that provably excludes the pointer. A window nearly
     // as tall as the display cannot dodge it by moving to a corner, so the
@@ -105,9 +133,86 @@ const snap = async (name) => {
   fs.writeFileSync(path.join(MEDIA, PREFIX + name), (await win.capturePage()).toPNG());
 };
 
+const DOTS = `JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.className))`;
+const MSGS = `document.querySelectorAll('.msg[data-platform]').length`;
+
+/**
+ * The socket is cut mid-transcript, without a close frame. Nobody has to press
+ * anything: the source backs off, reconnects, and the feed carries on. Real
+ * chat connections drop several times an evening, and the happy-path run never
+ * sees it.
+ */
+async function scenarioDrop() {
+  check('connected before the drop', await until(`${DOTS}.includes('online')`, 15000));
+  const before = Number(await q(MSGS));
+  check('messages arriving before the drop', before > 0, `msgs=${before}`);
+
+  // The server terminates both sockets 4s in.
+  check('the drop is noticed, not sat on',
+    await until(`!JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 15000),
+    await q(DOTS));
+  check('the status says it is retrying',
+    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /retry|connecting|error/.test(d.title))`, 15000),
+    await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
+
+  check('it reconnects on its own',
+    await until(`JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 40000),
+    await q(DOTS));
+  check('the feed carries on after reconnecting',
+    await until(`${MSGS} > ${before}`, 30000),
+    `before=${before} after=${await q(MSGS)}`);
+}
+
+/**
+ * Every emote/badge/icon provider unreachable. They are an enhancement; losing
+ * them must not cost a single message.
+ */
+async function scenarioDegraded() {
+  check('chat still connects with every catalogue down',
+    await until(`JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 20000), await q(DOTS));
+  check('messages still render', await until(`${MSGS} >= 20`, 20000), `msgs=${await q(MSGS)}`);
+  const state = JSON.parse(await q(`JSON.stringify({
+    native: document.querySelectorAll('.msg img.emote[src*="/emoticons/v2/"]').length,
+    thirdParty: document.querySelectorAll('.msg img.emote:not([src*="/emoticons/v2/"])').length,
+    twitchBadges: document.querySelectorAll('.msg img.badge-img[src*="/twitch-badges/"]').length,
+    ggBadges: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/files/icons/"]').length,
+    chips: document.querySelectorAll('.msg .badge').length,
+    broken: Array.from(document.querySelectorAll('.msg img')).filter((i) => i.complete && i.naturalWidth === 0).length,
+    text: document.querySelector('.msg[data-platform] .text') ? document.querySelector('.msg[data-platform] .text').textContent : ''
+  })`));
+  // A catalogue outage costs the catalogues, and nothing else. Twitch sends its
+  // own emotes as ranges on the message, so those keep working; 7TV, BTTV, FFZ
+  // and GoodGame's smiles are lookups, so those quietly do not happen.
+  check("twitch's own emotes survive — they need no catalogue", state.native > 0, `native=${state.native}`);
+  check('third-party emotes are simply absent', state.thirdParty === 0, `thirdParty=${state.thirdParty}`);
+  // Twitch badge artwork is fetched per channel, so it goes; GoodGame builds
+  // its icon urls straight from the message, so it stays.
+  check('twitch badge artwork is absent', state.twitchBadges === 0, `twitchBadges=${state.twitchBadges}`);
+  check('goodgame icons survive — they need no catalogue either',
+    state.ggBadges > 0, `ggBadges=${state.ggBadges}`);
+  // Which is the point of keeping the text chips as a fallback.
+  check('twitch badges degrade to text chips', state.chips > 0, `chips=${state.chips}`);
+  check('no broken images left on screen', state.broken === 0, `broken=${state.broken}`);
+  check('the message text itself is intact', state.text.length > 0, JSON.stringify(state.text));
+}
+
 app.whenReady().then(async () => {
   await wait(1500);
   if (!win) { console.log('E2E FAIL: no window'); app.exit(1); return; }
+
+  if (SCENARIO) {
+    if (SCENARIO === 'drop') await scenarioDrop();
+    else await scenarioDegraded();
+    check('no console errors', consoleErrors.length === 0, consoleErrors.join(' | '));
+    if (failures.length) {
+      console.log(`\nE2E FAIL: ${failures.length} check(s) failed`);
+      app.exit(1);
+    } else {
+      console.log('\nE2E PASS');
+      app.exit(0);
+    }
+    return;
+  }
 
   // The scripted transcript finishes just under 10s in.
   await wait(11000);
@@ -184,7 +289,11 @@ app.whenReady().then(async () => {
     const r = document.getElementById(id).getBoundingClientRect();
     return [Math.round(r.width), Math.round(r.height)];
   }))`;
-  placeWindow('away');
+  const placed = (ok, where) =>
+    check(`the harness put the window ${where} the pointer`, ok,
+      `cursor=${JSON.stringify(screen.getCursorScreenPoint())} window=${JSON.stringify(win.getBounds())}`);
+
+  placed(await placeWindowVerified('away'), 'away from');
   check('unlocked, not hovered: no backdrop', await until(`${BG} === 'rgba(10, 12, 18, 0)'`),
     await q(BG));
   check('not hovered: channel names are invisible', await until(`${NAME_OPACITY} === '0'`));
@@ -193,7 +302,7 @@ app.whenReady().then(async () => {
     await until(`${BAR_BG} === 'rgba(0, 0, 0, 0)' && ${BAR_SHADOW} === 'none'`),
     `${await q(BAR_BG)} / ${await q(BAR_SHADOW)}`);
   const layoutCold = await q(BAR_LAYOUT);
-  placeWindow('under');
+  placed(await placeWindowVerified('under'), 'under');
   check('unlocked, hovered: backdrop visible', await until(`${BG} === 'rgba(10, 12, 18, 0.55)'`),
     await q(BG));
   // The same hover that fades the backdrop in also names each dot's channel.

@@ -269,6 +269,19 @@ describe('createPayloadStore', () => {
       // The launch still has a working payload.
       expect(failing.readVersion(paths.stagedDir)).toBe('1.0.1');
     });
+
+    it('has nothing to put back on a first install that fails', () => {
+      // No payload staged yet, so the rescue has nothing to rescue; it must
+      // still report the failure rather than pretending the install worked.
+      writePayload(paths.incomingDir, '1.0.2');
+      markComplete(paths.incomingDir);
+      const failing = createPayloadStore(paths, {
+        ...fs,
+        renameSync: (() => { throw new Error('EPERM'); }) as typeof fs.renameSync,
+      });
+      expect(failing.promoteIncoming()).toBe('failed');
+      expect(failing.readVersion(paths.stagedDir)).toBe(null);
+    });
   });
 
   describe('quarantine', () => {

@@ -178,7 +178,10 @@ const CONTENT_TYPES = {
   '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif',
 };
 
-export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, only = null } = {}) {
+export async function startFakeChat({
+  port = 0, script = SCRIPT, loop = false, only = null,
+  dropAfterMs = 0, failCatalogues = false,
+} = {}) {
   if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
   const http = createServer((req, res) => {
@@ -212,6 +215,12 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
         },
       });
     }
+    if (failCatalogues && url.pathname !== '/api/getchannelstatus') {
+      // Every emote/badge provider unreachable at once. The chat itself must
+      // carry on: the catalogues are an enhancement, not a dependency.
+      res.writeHead(503, { 'Content-Type': 'text/plain' }).end('catalogue down');
+      return;
+    }
     if (url.pathname === '/api/4/smiles') return send(fx.ggSmiles);
     if (url.pathname === '/v3/emote-sets/global') return send(fx.sevenTvGlobal);
     if (url.pathname.startsWith('/v3/users/twitch/')) return send({ emote_set: { emotes: [] } });
@@ -237,8 +246,17 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
     return t;
   };
 
+  const dropped = new Set();
   wss.on('connection', (ws, req) => {
     const isGoodGame = (req.url || '').includes('chat2');
+    const platform = isGoodGame ? 'goodgame' : 'twitch';
+    // A real network drop: no close frame, just gone. That is what the client
+    // has to notice and recover from, and it is nothing like a clean close.
+    // Once per platform, so the reconnection is allowed to succeed.
+    if (dropAfterMs && !dropped.has(platform)) {
+      dropped.add(platform);
+      later(() => ws.terminate(), dropAfterMs);
+    }
     if (isGoodGame) return runGoodGame(ws);
     return runTwitch(ws);
   });

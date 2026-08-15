@@ -133,6 +133,18 @@ describe('TwitchSource connection', () => {
     expect(h.socket.sent).toEqual(['PONG :tmi.twitch.tv']);
   });
 
+  it('ignores a PING that arrives after the socket is gone', () => {
+    // The frame can be in flight while the socket is being torn down; replying
+    // on a dead socket would throw inside the message handler.
+    const h = harness();
+    h.socket.onopen?.();
+    h.socket.sent.length = 0;
+    const raw = h.socket;
+    (h.source as unknown as { ws: unknown }).ws = null;
+    expect(() => h.socket.onmessage?.({ data: 'PING :tmi.twitch.tv\r\n' })).not.toThrow();
+    expect(raw.sent).toEqual([]);
+  });
+
   it('sends a keepalive PING when the timer fires', () => {
     const h = harness();
     h.socket.onopen?.();
@@ -140,6 +152,24 @@ describe('TwitchSource connection', () => {
     const keepalive = h.timers[h.timers.length - 1];
     keepalive?.fn();
     expect(h.socket.sent).toEqual(['PING :overlay']);
+  });
+
+  it('keeps sending keepalives, not just the first one', () => {
+    // The keepalive reschedules itself; if that arrow is never reached the
+    // connection goes quiet after one ping and Twitch drops it.
+    const h = harness();
+    h.socket.onopen?.();
+    h.socket.sent.length = 0;
+    h.timers.at(-1)?.fn();          // first keepalive
+    h.timers.at(-1)?.fn();          // the one it scheduled
+    expect(h.socket.sent).toEqual(['PING :overlay', 'PING :overlay']);
+  });
+
+  it('does not throw a keepalive at a socket that is gone', () => {
+    const h = harness();
+    h.socket.onopen?.();
+    (h.source as unknown as { ws: unknown }).ws = null;
+    expect(() => h.timers.at(-1)?.fn()).not.toThrow();
   });
 
   it('retries with backoff after the socket closes', () => {
@@ -360,6 +390,16 @@ describe('TwitchSource.buildParts', () => {
       { type: 'text', value: ' lol' },
     ]);
     expect(source.buildParts('xPagManx', '')).toEqual([{ type: 'text', value: 'xPagManx' }]);
+  });
+
+  it('handles a message that opens with an emote', () => {
+    // Nothing is pending yet at that point, which is a different path through
+    // the scan than an emote arriving after some text.
+    source.emoteMap = new Map([['PagMan', { url: 'https://cdn/pagman' }]]);
+    expect(source.buildParts('PagMan hello', '')).toEqual([
+      { type: 'emote', url: 'https://cdn/pagman', name: 'PagMan' },
+      { type: 'text', value: ' hello' },
+    ]);
   });
 
   it('keeps urls intact alongside emotes', () => {

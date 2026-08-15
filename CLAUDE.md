@@ -91,6 +91,15 @@ mtimes; it records the write order now.
 both chat protocols and serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
+`npm run e2e` runs three scenarios, because the happy path is the one thing a
+real chat rarely stays on:
+
+| Scenario | What it puts the app through |
+|---|---|
+| default | messages, badges, emotes, colours, lock, settings, drag regions |
+| `--scenario=drop` | both sockets terminated mid-transcript with no close frame — the app must notice, back off, reconnect and carry on, with nobody pressing anything |
+| `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
+
 Assert on what is *painted* — `getClientRects().length` — not on what an
 attribute claims. Two bugs in this project passed an attribute check while the
 element was plainly visible on screen.

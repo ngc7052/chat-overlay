@@ -1,0 +1,19 @@
+# Nothing ships at runtime — the app has zero runtime dependencies — but the
+# build and test tooling is still a supply chain, and so are the actions.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the routine bumps; anything major still comes on its own.
+      dev-dependencies:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

@@ -2,8 +2,10 @@
  * End-to-end: boots the real, unmodified app against the fake chat server and
  * asserts on what is actually painted.
  *
- *   node test/e2e/run.mjs            assert only
- *   node test/e2e/run.mjs --media    also write docs/media/*.png and frames
+ *   node test/e2e/run.mjs                     assert only
+ *   node test/e2e/run.mjs --media             also write docs/media/*.png
+ *   node test/e2e/run.mjs --scenario=drop     kill the sockets, expect recovery
+ *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
  *
  * The unit suite covers the rules; this covers the wiring the unit suite
  * deliberately does not — that a message arriving on a socket ends up on screen
@@ -22,6 +24,10 @@ const wantMedia = process.argv.includes('--media');
 // --only=twitch / --only=goodgame captures one chat at a time, so a demo shows
 // what a single platform looks like rather than two interleaved.
 const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || null;
+// Scenarios put the app under conditions a real chat produces daily but a
+// happy-path run never sees: a dropped connection, and a catalogue host that
+// is down. Each runs the same real app against the same fake server.
+const scenario = (process.argv.find((a) => a.startsWith('--scenario=')) ?? '').split('=')[1] || '';
 
 // Build the e2e variant first, so the run always matches the current sources.
 await new Promise((resolve, reject) => {
@@ -33,7 +39,13 @@ await new Promise((resolve, reject) => {
   build.on('exit', (c) => (c === 0 ? resolve() : reject(new Error('build failed'))));
 });
 
-const server = await startFakeChat({ loop: wantMedia, only });
+const server = await startFakeChat({
+  loop: wantMedia || scenario === 'drop',
+  only,
+  // Mid-transcript, so there is traffic before and after the break.
+  dropAfterMs: scenario === 'drop' ? 4000 : 0,
+  failCatalogues: scenario === 'degraded',
+});
 const dataDir = path.join(root, 'dist', 'e2e-profile');
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
@@ -66,6 +78,7 @@ const child = spawn(process.execPath, [electron, '--no-sandbox', driver], {
     OVERLAY_E2E_MEDIA: wantMedia ? path.join(root, 'docs', 'media') : '',
     OVERLAY_E2E_PREFIX: only ? only + '-' : '',
     OVERLAY_E2E_ONLY: only ?? '',
+    OVERLAY_E2E_SCENARIO: scenario,
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],

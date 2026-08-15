@@ -63,12 +63,12 @@ describe('goodgameSmiles', () => {
 
   it('ignores a corrupt or malformed cache entry', async () => {
     const httpJson = httpFor({ [URLS.ggSmiles]: ggPayload });
-    const storage = memoryStorage({ 'gg-smiles-v1': 'not json' });
+    const storage = memoryStorage({ 'gg-smiles-v2': 'not json' });
     await createAssetApi({ httpJson, storage }).goodgameSmiles('5');
     expect(httpJson).toHaveBeenCalledTimes(1);
 
     const httpJson2 = httpFor({ [URLS.ggSmiles]: ggPayload });
-    const storage2 = memoryStorage({ 'gg-smiles-v1': JSON.stringify({ v: [] }) });
+    const storage2 = memoryStorage({ 'gg-smiles-v2': JSON.stringify({ v: [] }) });
     await createAssetApi({ httpJson: httpJson2, storage: storage2 }).goodgameSmiles('5');
     expect(httpJson2).toHaveBeenCalledTimes(1);
   });

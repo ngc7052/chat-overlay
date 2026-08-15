@@ -32,7 +32,11 @@ export function normaliseGgCatalogue(raw: unknown): GgSmile[] {
     if (!item || typeof item !== 'object') continue;
     const key = String(item.key ?? '').toLowerCase();
     const images = item.images ?? {};
-    const url = https(String(images.small ?? images.big ?? '') || null);
+    // "big" first: GoodGame's "small" is 18px tall, and the overlay draws
+    // emotes at around 27px — more on a scaled display — so it arrived visibly
+    // soft. "big" is exactly twice that and is published for every smile;
+    // "small" stays as the fallback for any that is not.
+    const url = https(String(images.big || images.small || '') || null);
     if (!key || !url) continue;
     out.push({
       k: key,

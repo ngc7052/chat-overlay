@@ -26,13 +26,25 @@ describe('normaliseGgCatalogue', () => {
       images: { small: '//gg/small.png', big: '//gg/big.png', gif: '//gg/anim.gif' },
     }]);
     expect(list).toEqual([{
-      k: 'pekaclap', c: 5, u: 'https://gg/small.png', g: 'https://gg/anim.gif',
+      k: 'pekaclap', c: 5, u: 'https://gg/big.png', g: 'https://gg/anim.gif',
     }]);
   });
 
-  it('falls back to the big image and blanks the gif for still smiles', () => {
-    const list = normaliseGgCatalogue([{ key: 'a', images: { big: '//gg/big.png' } }]);
-    expect(list[0]).toMatchObject({ u: 'https://gg/big.png', g: '', c: 0 });
+  it('prefers the big image, because "small" is 18px and we draw at ~27', () => {
+    const list = normaliseGgCatalogue([{
+      key: 'a', images: { small: '//gg/small.png', big: '//gg/big.png' },
+    }]);
+    expect(list[0]).toMatchObject({ u: 'https://gg/big.png' });
+  });
+
+  it('falls back to small when a smile has no big variant', () => {
+    const list = normaliseGgCatalogue([{ key: 'a', images: { small: '//gg/small.png' } }]);
+    expect(list[0]).toMatchObject({ u: 'https://gg/small.png', g: '', c: 0 });
+  });
+
+  it('ignores an empty url rather than treating it as a variant', () => {
+    const list = normaliseGgCatalogue([{ key: 'a', images: { big: '', small: '//gg/small.png' } }]);
+    expect(list[0]).toMatchObject({ u: 'https://gg/small.png' });
   });
 
   it('blanks the gif when an animated smile has none', () => {

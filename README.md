@@ -171,12 +171,27 @@ cannot brick an install or nag you into reinstalling it.
 
 ### Publishing one
 
+Releases are automatic. Bump `app/payload/version.json` — the only place the
+version is set — and merge to `master`:
+
+```json
+{ "version": "1.0.1" }
+```
+
+`.github/workflows/release.yml` runs on every push to `master` but publishes
+only when the version has no tag yet, so ordinary merges (a README fix, a bug
+fix without a bump) run it, see the tag already exists, and stop. **The version
+file is the release trigger.** It syntax-checks the app, builds, and verifies
+both artifacts before publishing — the manifest has to declare the same version
+as the tag and contain the files the updater requires, and the zip has to
+contain the exe and the bootstrapper. A bad payload asset would break updating
+for every existing install, so it is caught before the release exists rather
+than after.
+
+To build locally without publishing:
+
 ```bash
-# 1. bump app/payload/version.json — the only place the version is set
-# 2. build; the last line prints the exact release command for that version
-./build.sh --zip
-gh release create v1.0.1 dist/ChatOverlay.zip dist/app-payload.json.gz \
-  --title "ChatOverlay 1.0.1" --notes "..."
+./build.sh --zip     # dist/ChatOverlay.zip + dist/app-payload.json.gz
 ```
 
 The release **tag must be `v` + the version in `version.json`** (`build.sh`

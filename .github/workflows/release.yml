@@ -1,0 +1,111 @@
+name: Release
+
+# Publishes a release when app/payload/version.json names a version that has no
+# tag yet. Merging anything else — a README fix, a bug fix without a version
+# bump — runs this workflow, finds the tag already exists, and stops. So the way
+# to ship is: bump version.json in the PR, merge, done.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # tags decide whether this version is already out
+
+      - name: Resolve version
+        id: v
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import json;print(json.load(open('app/payload/version.json'))['version'])")
+          # Single source of truth for the runtime version lives in build.sh.
+          ELECTRON=$(grep -oP 'ELECTRON_VERSION:-\K[0-9.]+' build.sh)
+          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"      >> "$GITHUB_OUTPUT"
+          echo "electron=$ELECTRON" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION is already released — bump app/payload/version.json to publish a new one"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$VERSION has no tag yet — building a release"
+          fi
+
+      - name: Syntax-check the app
+        if: steps.v.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          find app -name '*.js' -print0 | xargs -0 -n1 node --check
+          python3 -c "import ast,sys; ast.parse(open('tools/make-payload.py').read())"
+
+      - name: Cache Electron runtime
+        if: steps.v.outputs.publish == 'true'
+        uses: actions/cache@v4
+        with:
+          path: dist/electron-v*-win32-x64.zip
+          key: electron-${{ steps.v.outputs.electron }}-win32-x64
+
+      - name: Build
+        if: steps.v.outputs.publish == 'true'
+        run: ./build.sh --zip
+
+      - name: Verify artifacts
+        if: steps.v.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          test "$(cat dist/RELEASE_TAG)" = "${{ steps.v.outputs.tag }}"
+          # A broken payload asset would break updating for every existing
+          # install, so check it here rather than finding out after publishing.
+          python3 - "${{ steps.v.outputs.version }}" <<'PY'
+          import gzip, json, sys, zipfile
+          version = sys.argv[1]
+
+          manifest = json.load(gzip.open('dist/app-payload.json.gz'))
+          assert manifest['version'] == version, (manifest['version'], version)
+          for name in ('main.js', 'preload.js', 'version.json', 'renderer/index.html'):
+              assert name in manifest['files'], f'payload missing {name}'
+          declared = json.loads(manifest['files']['version.json']['data'])['version']
+          assert declared == version, (declared, version)
+
+          names = zipfile.ZipFile('dist/ChatOverlay.zip').namelist()
+          for name in ('ChatOverlay.exe', 'resources/app/boot.js',
+                       'resources/app/payload/main.js'):
+              assert name in names, f'zip missing {name}'
+          print(f'ok: v{version}, {len(manifest["files"])} payload files')
+          PY
+
+      - name: Publish
+        if: steps.v.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'EOF'
+          Download **`ChatOverlay.zip`** below, unzip anywhere, run `ChatOverlay.exe`.
+          Windows 10/11 64-bit — no installer, no Node.js, no admin rights.
+
+          Windows shows a SmartScreen warning the first time because the exe is not
+          code-signed: **More info → Run anyway**.
+
+          Existing installs pick this up from Settings → **Updates** (about 35 KB).
+
+          ---
+          EOF
+          gh release create "${{ steps.v.outputs.tag }}" \
+            dist/ChatOverlay.zip dist/app-payload.json.gz \
+            --target "$GITHUB_SHA" \
+            --title "ChatOverlay ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md \
+            --generate-notes

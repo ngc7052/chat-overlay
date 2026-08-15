@@ -249,7 +249,12 @@ app.whenReady().then(async () => {
     scrollerClearsBar: document.querySelector('.settings-body').getBoundingClientRect().top
       >= document.getElementById('bar').getBoundingClientRect().bottom,
     // Hit targets in the bar, which were too small to aim at comfortably.
-    iconSize: Math.round(document.getElementById('btn-settings').getBoundingClientRect().height)
+    iconSize: Math.round(document.getElementById('btn-settings').getBoundingClientRect().height),
+    // Drawing on top of the draggable chat does not mask its drag rect, so the
+    // panel has to opt out or none of its controls can be clicked.
+    panelRegion: getComputedStyle(document.getElementById('settings')).webkitAppRegion,
+    controlRegions: ['btn-add-source', 'fontSize', 'customCss'].map(
+      (id) => getComputedStyle(document.getElementById(id)).webkitAppRegion)
   })`));
   check('settings panel opens', settings.painted);
   check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 2), `rows=${settings.rows}`);
@@ -264,6 +269,10 @@ app.whenReady().then(async () => {
   check('settings content clears the floating bar', settings.clearsBar);
   check('the settings scroll track clears the bar', settings.scrollerClearsBar);
   check('bar buttons are a comfortable hit target', settings.iconSize >= 28, `size=${settings.iconSize}`);
+  check('settings is not swallowed by the draggable chat beneath it',
+    settings.panelRegion === 'no-drag', settings.panelRegion);
+  check('settings controls are clickable, not drag surface',
+    settings.controlRegions.every((r) => r !== 'drag'), JSON.stringify(settings.controlRegions));
   await snap('settings.png');
 
   // Expanding a group reveals its controls.

@@ -390,6 +390,11 @@ body.outline .msg {
   flex-direction: column;
   background: var(--ui-bg);
   color: var(--ui-text);
+  /* Must opt out explicitly. Drawing on top of the chat is not enough: an
+     element with no app-region of its own does not mask the drag rect
+     underneath it, so every control in here became drag surface and stopped
+     responding to clicks. */
+  -webkit-app-region: no-drag;
   /* Leaves the bar its own strip. Padding here rather than on the scrolling
      body, so the scrollbar starts below the bar instead of running up behind
      its buttons. */

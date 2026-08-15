@@ -298,8 +298,6 @@ function renderStatus(): void {
     const el = document.createElement('span');
     el.className = 'src-dot ' + d.state;
     el.title = d.title;
-    // A channel that is down is the one time the bar asks to be clicked.
-    if (d.state === 'error') el.addEventListener('click', reconnectAll);
     const name = document.createElement('span');
     name.className = 'src-name';
     name.textContent = d.label;
@@ -558,10 +556,28 @@ function showSettings(show: boolean): void {
 }
 
 settingsBtn.addEventListener('click', () => showSettings(settingsEl.hidden));
-$('btn-settings-close').addEventListener('click', () => showSettings(false));
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsEl.hidden) showSettings(false);
 });
+
+// Which settings groups are expanded, kept between sessions. This is a view
+// preference, not configuration, so it lives in localStorage rather than in
+// config.json where it would need a schema and a migration.
+(() => {
+  const KEY = 'settings-open-groups';
+  const groups = Array.from(document.querySelectorAll<HTMLDetailsElement>('#settings .group'));
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    if (Array.isArray(saved)) groups.forEach((g) => { g.open = saved.includes(g.id); });
+  } catch { /* a corrupt entry just means the defaults stand */ }
+  for (const g of groups) {
+    g.addEventListener('toggle', () => {
+      try {
+        localStorage.setItem(KEY, JSON.stringify(groups.filter((x) => x.open).map((x) => x.id)));
+      } catch { /* quota — remembering this is best effort */ }
+    });
+  }
+})();
 $('btn-add-source').addEventListener('click', () => {
   config.sources.push({ platform: 'twitch', channel: '', enabled: true });
   persist({ sources: config.sources });

@@ -14,6 +14,9 @@
   --ui-text: #e6ebf5;
   --ui-dim: #9aa7bd;
   --accent: #6f8cff;
+  /* Height of the top bar. The settings panel is drawn under it, so it needs
+     to know how far down its content has to start. */
+  --bar-h: 33px;
 }
 
 * { box-sizing: border-box; }
@@ -49,13 +52,16 @@ body { display: flex; flex-direction: column; }
      a hard edge reads as chrome bolted onto a transparent window. The controls
      float over the chat instead; contrast comes from their own shadow. */
   background: transparent;
+  min-height: var(--bar-h);
+  /* The whole strip drags, empty space included; the buttons opt out. */
+  -webkit-app-region: drag;
   font-size: 12px;
   font-weight: 600;
   color: var(--ui-text);
 }
 
 #grip {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -65,6 +71,22 @@ body { display: flex; flex-direction: column; }
   -webkit-app-region: drag;
   cursor: move;
 }
+/* Where to grab the window. Without the old solid strip there was nothing to
+   aim at, so the handle and a faint fill appear whenever the pointer is over
+   the overlay — the same signal that brings the backdrop up. */
+#drag-handle {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  color: var(--ui-dim);
+  opacity: 0;
+  transition: opacity .15s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
+}
+body:not(.locked):hover #drag-handle { opacity: .85; }
+body:not(.locked):hover #grip { background: rgba(255, 255, 255, .07); }
+
 #status {
   flex: 1 1 auto;
   display: flex;
@@ -81,12 +103,14 @@ body { display: flex; flex-direction: column; }
 /* One dot per channel: colour carries the state, the name is revealed on
    hover. The names duplicate the "connected — …" lines already in the chat,
    so they do not earn permanent space in the bar. */
+/* Deliberately NOT no-drag. Making the dots clickable stole drag surface from
+   the bar, and because the names expand on hover it stole it exactly as the
+   pointer arrived to grab the window. Reconnect has its own button. */
 .src-dot {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 4px;
-  -webkit-app-region: no-drag;
 }
 .src-dot::before {
   content: '';
@@ -98,7 +122,6 @@ body { display: flex; flex-direction: column; }
 }
 .src-dot.online::before { background: #3fb950; }
 .src-dot.error::before { background: #f85149; }
-.src-dot.error { cursor: pointer; }
 .src-dot.connecting::before { background: #d29922; }
 
 .src-name {
@@ -326,43 +349,47 @@ body.outline .msg {
    so the hidden attribute alone would never actually hide the panel. */
 #settings[hidden] { display: none !important; }
 
-.settings-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--ui-line);
-}
-.settings-head button {
-  background: var(--accent);
-  color: #0d1220;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  padding: 4px 12px;
-  font: inherit;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.settings-head button:hover { filter: brightness(1.12); }
-
 .settings-body {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 10px 14px;
+  /* The bar floats above this panel (it is the way out of it), so the first
+     group has to start below the bar rather than underneath its icons. */
+  padding: var(--bar-h) 10px 14px;
   min-width: 0;
 }
-.settings-body section { padding: 8px 0; border-bottom: 1px solid var(--ui-line); }
-.settings-body section:last-child { border-bottom: 0; }
-.settings-body h3 {
-  margin: 2px 0 8px;
+
+/* One collapsible group per topic. Everything but Channels starts closed, so
+   the panel opens as a short list of headings instead of a wall of controls. */
+.group { border-bottom: 1px solid var(--ui-line); }
+.group:last-child { border-bottom: 0; }
+.group > summary {
+  padding: 9px 2px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--ui-dim);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
 }
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .15s ease;
+}
+.group[open] > summary::before { transform: rotate(45deg); }
+.group > summary:hover { color: var(--ui-text); }
+.group[open] > summary { color: var(--ui-text); }
+.group > *:last-child { margin-bottom: 10px; }
 
 #settings label { display: block; margin-bottom: 8px; color: var(--ui-text); }
 #settings label.check { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }

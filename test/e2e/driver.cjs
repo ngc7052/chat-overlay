@@ -64,9 +64,17 @@ function placeWindow(where) {
   if (where === 'under') {
     win.setPosition(Math.round(pt.x - w / 2), Math.round(pt.y - h / 2));
   } else {
-    // Whichever corner is furthest from the pointer, kept on screen.
-    const x = pt.x > area.x + area.width / 2 ? area.x : area.x + area.width - w;
-    const y = pt.y > area.y + area.height / 2 ? area.y : area.y + area.height - h;
+    // The first placement that provably excludes the pointer. A window nearly
+    // as tall as the display cannot dodge it by moving to a corner, so the
+    // last candidates push it off the screen edge entirely.
+    const inside = (x, y) => pt.x >= x && pt.x < x + w && pt.y >= y && pt.y < y + h;
+    const candidates = [
+      [area.x + area.width - w, area.y + area.height - h],
+      [area.x, area.y],
+      [area.x - w + 8, area.y],
+      [area.x + area.width - 8, area.y],
+    ];
+    const [x, y] = candidates.find(([cx, cy]) => !inside(cx, cy)) ?? candidates[2];
     win.setPosition(Math.round(x), Math.round(y));
   }
   // Chromium re-evaluates hover on the next mouse event, so nudge it.
@@ -180,26 +188,59 @@ app.whenReady().then(async () => {
     await q(BG));
   // The same hover that fades the backdrop in also names each dot's channel.
   check('hovering reveals the channel names', await until(`${NAME_W} > 0`));
+  check('hovering shows where to grab the window',
+    await until(`getComputedStyle(document.getElementById('drag-handle')).opacity > 0.5`));
   await snap('overlay-hover.png');
+
+  // The whole bar must stay draggable. Marking the status dots as no-drag once
+  // stole that surface, and because the names expand on hover it went missing
+  // exactly as the pointer arrived to grab the window.
+  const optedOut = JSON.parse(await q(`JSON.stringify(
+    Array.from(document.querySelectorAll('#grip, #grip *, #bar > :not(button)'))
+      .filter((el) => getComputedStyle(el).webkitAppRegion === 'no-drag')
+      .map((el) => el.id || el.className || el.tagName)
+  )`));
+  check('nothing inside the grip opts out of dragging', optedOut.length === 0, JSON.stringify(optedOut));
+  check('the whole bar is a drag region, empty space included',
+    await q(`['bar', 'grip'].every((id) => getComputedStyle(document.getElementById(id)).webkitAppRegion === 'drag')`));
 
   // Settings panel opens, closes, and swaps the cog for a back arrow.
   await q(`document.getElementById('btn-settings').click(); true`);
-  await wait(300);
+  const opened = await until(`document.getElementById('settings').getClientRects().length > 0`);
   const settings = JSON.parse(await q(`JSON.stringify({
-    painted: document.getElementById('settings').getClientRects().length > 0,
+    painted: ${opened},
     back: getComputedStyle(document.querySelector('#btn-settings .i-back')).display,
     rows: document.querySelectorAll('#sources .src-row').length,
-    overflowX: document.querySelector('.settings-body').scrollWidth - document.querySelector('.settings-body').clientWidth
+    overflowX: document.querySelector('.settings-body').scrollWidth - document.querySelector('.settings-body').clientWidth,
+    groups: document.querySelectorAll('#settings .group').length,
+    open: Array.from(document.querySelectorAll('#settings .group')).filter((g) => g.open).map((g) => g.id),
+    exits: document.querySelectorAll('#settings button[id*="close"], .settings-head').length,
+    // The bar floats above the panel; its content must start below it.
+    clearsBar: document.querySelector('#settings .group').getBoundingClientRect().top
+      >= document.getElementById('bar').getBoundingClientRect().bottom
   })`));
   check('settings panel opens', settings.painted);
   check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 2), `rows=${settings.rows}`);
   check('settings icon swaps to back arrow', settings.back === 'block');
   check('settings does not overflow sideways', settings.overflowX === 0, `overflow=${settings.overflowX}`);
+  check('settings is split into collapsible groups', settings.groups >= 8, `groups=${settings.groups}`);
+  check('only Channels is expanded to begin with',
+    JSON.stringify(settings.open) === '["g-channels"]', JSON.stringify(settings.open));
+  // Two ways out, overlapping each other in the same corner, is what prompted
+  // this: the panel's own header sat underneath the bar's back arrow.
+  check('the bar back arrow is the only way out', settings.exits === 0, `exits=${settings.exits}`);
+  check('settings content clears the floating bar', settings.clearsBar);
   await snap('settings.png');
 
-  await q(`document.getElementById('btn-settings-close').click(); true`);
-  await wait(250);
-  check('settings panel closes', await q(`document.getElementById('settings').getClientRects().length === 0`));
+  // Expanding a group reveals its controls.
+  await q(`document.getElementById('g-text').open = true; true`);
+  check('expanding a group reveals its controls',
+    await until(`document.getElementById('fontSize').getClientRects().length > 0`));
+  await q(`document.getElementById('g-text').open = false; true`);
+
+  await q(`document.getElementById('btn-settings').click(); true`);
+  check('settings panel closes',
+    await until(`document.getElementById('settings').getClientRects().length === 0`));
 
   // Locked: no chrome, no backdrop, still showing messages.
   await q(`window.overlay.setLocked(true)`);

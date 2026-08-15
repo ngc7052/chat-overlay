@@ -233,6 +233,27 @@ describe('GoodGameSource.connect', () => {
     expect(h.warnings).toEqual(['gg smiles failed: nope']);
   });
 
+  it('uses the smiles once they load', async () => {
+    // The success half of the same call: the map has to reach the parser, or
+    // every :key: stays as text with nobody the wiser.
+    const goodgameSmiles = vi.fn().mockResolvedValue(
+      new Map([['peka', { url: 'https://gg/peka.png' }]]),
+    );
+    const h = harness({ assets: { goodgameSmiles, twitchThirdParty: vi.fn(), twitchBadges: vi.fn() } });
+    await h.source.connect();
+    await new Promise((r) => setTimeout(r, 0));
+
+    h.socket().onmessage?.({
+      data: JSON.stringify({
+        type: 'message',
+        data: { channel_id: '138653', message_id: 'm1', user_name: 'n', text: 'hi :peka:' },
+      }),
+    });
+    expect(h.messages.at(-1)?.parts).toContainEqual({
+      type: 'emote', url: 'https://gg/peka.png', name: 'peka',
+    });
+  });
+
   it('reports socket errors and retries on close', async () => {
     const h = harness();
     await h.source.connect();

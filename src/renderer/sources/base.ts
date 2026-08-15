@@ -33,6 +33,7 @@ export abstract class BaseSource {
   protected readonly now: () => number;
   protected readonly assets: SourceOptions['assets'];
   protected readonly onWarn: (message: string) => void;
+  protected readonly wsUrl: string | null;
 
   constructor(opts: SourceOptions) {
     this.channel = opts.channel;
@@ -49,6 +50,7 @@ export abstract class BaseSource {
     this.now = opts.now ?? Date.now;
     this.assets = opts.assets;
     this.onWarn = opts.onWarn ?? (() => {});
+    this.wsUrl = opts.wsUrl ?? null;
   }
 
   get key(): string {

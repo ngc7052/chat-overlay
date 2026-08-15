@@ -73,7 +73,7 @@ export class TwitchSource extends BaseSource {
     this.closeSocket();
     this.status('connecting');
 
-    const ws = this.createSocket(TWITCH_WS_URL);
+    const ws = this.createSocket(this.wsUrl ?? TWITCH_WS_URL);
     this.ws = ws;
 
     ws.onopen = () => {

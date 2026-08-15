@@ -11,15 +11,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
-    "check": "npm run typecheck && npm run coverage"
+    "check": "npm run typecheck && npm run coverage && npm run e2e",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "e2e": "node test/e2e/run.mjs",
+    "e2e:media": "node test/e2e/run.mjs --media"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.0",
     "@types/node": "^22.10.2",
     "@vitest/coverage-v8": "^2.1.8",
     "electron": "^43.4.0",
     "esbuild": "^0.24.2",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vitest": "^2.1.8",
+    "ws": "^8.21.3"
   }
 }

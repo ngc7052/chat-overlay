@@ -3,6 +3,11 @@
 Transparent, always-on-top chat overlay for **GoodGame.ru** and **Twitch**.
 Read-only and anonymous — no login, no OAuth, no tokens anywhere.
 
+![Both chats in one overlay](docs/media/demo.gif)
+
+*Locked: no window, no background, no scrollbar — just the messages, and clicks
+go through to the game. Both platforms merge into one feed.*
+
 ## Download
 
 **[Get the latest release →](../../releases/latest)** — grab `ChatOverlay.zip`,
@@ -26,6 +31,19 @@ Once at least one channel is enabled, press `Ctrl`+`Alt`+`O` to **lock** it: the
 window pins above everything and goes fully click-through, so clicks land on the
 game behind it. (An empty overlay would be invisible, so it refuses to start
 locked until something is enabled.)
+
+## What it looks like
+
+| Unlocked | Settings |
+|---|---|
+| ![Unlocked, hovered](docs/media/overlay-hover.png) | ![Settings](docs/media/settings.png) |
+
+Unlocked, moving the pointer over the window fades a backdrop in so you can see
+its edges to drag and resize. Locked, it disappears again.
+
+Every screenshot and the animation above are captured by `npm run e2e:media`
+from a scripted transcript, so they are reproducible and show real rendering —
+badges, emotes, nickname colours and all.
 
 ## Controls
 
@@ -145,9 +163,17 @@ inside a build). `app/` and `dist/` are build output and are not in git.
 npm install          # ELECTRON_SKIP_BINARY_DOWNLOAD=1 if you only want to test
 npm test             # unit tests
 npm run coverage     # the same, with the 100% thresholds enforced
+npm run e2e          # the real app against a local fake chat server
 npm run typecheck    # tsc --noEmit
+npm run check        # all three
 npm run build        # compile into app/
 ```
+
+The end-to-end run boots the actual app against a server that speaks both chat
+protocols and serves fixed emote, badge and icon fixtures. **It needs no network
+and does not depend on anyone being live**, so it either passes or has found a
+bug — which is also why the screenshots above can be regenerated on demand with
+`npm run e2e:media`.
 
 The logic — protocol parsing, emote assembly, colours, config migration, update
 manifest safety, payload selection — is held at **100% statements, branches,
@@ -197,12 +223,15 @@ cannot brick an install or nag you into reinstalling it.
 
 ### Publishing one
 
-Releases are automatic. Bump the version in `package.json` — the only place it is set — and merge to
-`master`:
+Describe the change, turn the descriptions into a version bump, merge:
 
-```json
-{ "version": "1.0.1" }
+```bash
+npx changeset        # what changed, and whether it is patch / minor / major
+npm run version      # bumps package.json and writes CHANGELOG.md
 ```
+
+Then open a PR with that bump and merge it. The **version bump is the release
+trigger** — everything else is automatic.
 
 `.github/workflows/release.yml` runs on every push to `master` and publishes
 only when the version has no tag yet, so ordinary merges (a README fix, a bug

@@ -16,6 +16,43 @@ export function channelStatusUrl(channel: string): string {
   return 'https://goodgame.ru/api/getchannelstatus?fmt=json&id=' + encodeURIComponent(channel);
 }
 
+/**
+ * GoodGame sends an icon name per message; these are the files behind them,
+ * read off the site's own stylesheet. They are white monochrome SVGs, which is
+ * exactly what an overlay on a dark background wants.
+ *
+ * Unlike Twitch, GoodGame publishes no badge API — the protocol carries only
+ * the name, so this mapping is the contract.
+ */
+export const GG_ICON_BASE = 'https://static.goodgame.ru/images/chat-svg-icons/';
+
+export const GG_ICONS: Record<string, string> = {
+  android: 'Android24px', cherry: 'Cherry24px', coin: 'Donut24px', crown: 'Crown24px',
+  cup: 'Cup24px', diamond: 'Dimond24px', eagle: 'Eagle24px', fire: 'Fire24px',
+  helper: 'Helper24px', 'invite-2': 'Invader24px', ios: 'Apple24px', lawyer: 'Lawyer24px',
+  moderator: 'Sword24px', mushroom: 'Mushroom24px', phone: 'Phone24px',
+  retroghost: 'RetroGhost24px', staff: 'Wrench24px', star: 'StarFull24px',
+  tank: 'Tank24px', top1: 'Hero24px', undead: 'Skull24px', win: 'Win24px',
+};
+
+/** GoodGame+ subscribers get a badge for how many months they have held it. */
+export const GG_PLUS_TIERS = [1, 3, 6, 12, 24, 48, 96];
+
+export function ggIconUrl(name: unknown, base: string = GG_ICON_BASE): string | null {
+  const file = GG_ICONS[String(name ?? '').toLowerCase()];
+  return file ? base + file + '.svg' : null;
+}
+
+export function ggPlusIconUrl(tier: unknown, base: string = GG_ICON_BASE): string | null {
+  const n = Number(tier) || 0;
+  if (n <= 0) return null;
+  // Round down to the highest tier badge that exists. n >= 1 here, and the
+  // lowest tier is 1, so there is always one to land on.
+  let step = GG_PLUS_TIERS[0] as number;
+  for (const tier of GG_PLUS_TIERS) if (n >= tier) step = tier;
+  return `${base}gg-${step}-24px.svg`;
+}
+
 interface GgMessageData {
   channel_id?: unknown;
   user_id?: unknown;
@@ -24,13 +61,19 @@ interface GgMessageData {
   premium?: unknown;
   staff?: unknown;
   color?: unknown;
+  icon?: unknown;
+  gg_plus_tier?: unknown;
   message_id?: unknown;
   timestamp?: unknown;
   text?: unknown;
 }
 
-/** GoodGame expresses roles as a numeric rights level rather than badges. */
-export function ggBadges(d: GgMessageData): Badge[] {
+/**
+ * Role comes from a numeric rights level, and the per-user icon comes from the
+ * `icon` field — the same one the site draws. Roles keep a text chip because
+ * the protocol sends no icon for them.
+ */
+export function ggBadges(d: GgMessageData, iconBase: string = GG_ICON_BASE): Badge[] {
   const rights = Number(d.user_rights) || 0;
   const badges: Badge[] = [];
   const add = (kind: string, label: string) => badges.push({ kind, label, url: null, title: label });
@@ -38,16 +81,40 @@ export function ggBadges(d: GgMessageData): Badge[] {
   if (Number(d.staff) > 0 || rights >= 40) add('staff', 'ADMIN');
   else if (rights >= 20) add('broadcaster', 'HOST');
   else if (rights >= 10) add('moderator', 'MOD');
-  if (Number(d.premium) > 0) add('premium', 'PREM');
+
+  const icon = ggIconUrl(d.icon, iconBase);
+  if (icon) {
+    badges.push({
+      kind: 'gg-icon',
+      label: String(d.icon).toUpperCase().slice(0, 4),
+      url: icon,
+      title: String(d.icon),
+    });
+  }
+
+  const ggPlus = ggPlusIconUrl(d.gg_plus_tier, iconBase);
+  if (ggPlus) {
+    badges.push({
+      kind: 'premium',
+      label: 'GG+',
+      url: ggPlus,
+      title: `GoodGame+ ${Number(d.gg_plus_tier)} months`,
+    });
+  }
+
+  // Premium with no icon of its own still deserves a marker.
+  if (Number(d.premium) > 0 && !icon) add('premium', 'PREM');
   return badges;
 }
 
 export class GoodGameSource extends BaseSource {
   readonly platform: PlatformName = 'goodgame';
   channelId: string | null = null;
+  private readonly iconBase: string;
 
   constructor(opts: SourceOptions) {
     super(opts);
+    this.iconBase = opts.iconBase ?? GG_ICON_BASE;
   }
 
   /** A channel name has to become the numeric id the chat server joins by. */
@@ -85,7 +152,7 @@ export class GoodGameSource extends BaseSource {
         .catch((err: Error) => this.onWarn('gg smiles failed: ' + err.message));
     }
 
-    const ws = this.createSocket(GG_WS_URL);
+    const ws = this.createSocket(this.wsUrl ?? GG_WS_URL);
     this.ws = ws;
 
     ws.onopen = () => {
@@ -157,7 +224,7 @@ export class GoodGameSource extends BaseSource {
       user: String(d.user_name ?? ''),
       userLogin: String(d.user_name ?? '').toLowerCase(),
       color: ggColor(d.color, String(d.user_name ?? '')),
-      badges: ggBadges(d),
+      badges: ggBadges(d, this.iconBase),
       parts: this.buildParts(String(d.text ?? '')),
       kind: 'chat',
       ts: d.timestamp ? Number(d.timestamp) * 1000 : this.now(),

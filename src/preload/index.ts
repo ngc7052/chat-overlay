@@ -16,6 +16,7 @@ const api = {
   openExternal: (url: string) => ipcRenderer.invoke('shell:open', url),
 
   httpJson: (url: string) => ipcRenderer.invoke('http:json', url),
+  endpoints: () => ipcRenderer.invoke('env:endpoints'),
 
   updateVersion: () => ipcRenderer.invoke('update:version'),
   updateCheck: () => ipcRenderer.invoke('update:check'),

@@ -93,10 +93,19 @@ function copyDir(from, to) {
 }
 
 copyDir(path.join(root, 'static/assets'), path.join(payloadDir, 'assets'));
-fs.copyFileSync(
-  path.join(root, 'static/renderer/index.html'),
-  path.join(payloadDir, 'renderer', 'index.html'),
-);
+// The shipped Content-Security-Policy only allows the two real chat origins.
+// The end-to-end harness talks to a local fake server instead, so that build —
+// and only that build — widens connect-src/img-src to loopback. Shipped builds
+// are untouched; a unit test asserts the source policy stays strict.
+let html = fs.readFileSync(path.join(root, 'static/renderer/index.html'), 'utf8');
+if (process.env.OVERLAY_E2E) {
+  html = html
+    .replace('connect-src wss://chat.goodgame.ru wss://irc-ws.chat.twitch.tv;',
+             'connect-src wss://chat.goodgame.ru wss://irc-ws.chat.twitch.tv ws://127.0.0.1:*;')
+    .replace("img-src 'self' https: data:;", "img-src 'self' https: http://127.0.0.1:* data:;");
+  console.log('==> e2e build: CSP widened to loopback');
+}
+fs.writeFileSync(path.join(payloadDir, 'renderer', 'index.html'), html);
 fs.copyFileSync(
   path.join(root, 'static/renderer/style.css'),
   path.join(payloadDir, 'renderer', 'style.css'),

@@ -51,6 +51,11 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: End-to-end
+        # Boots the real app against the local fake chat server. xvfb because a
+        # GitHub runner has no display; nothing here touches the network.
+        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" npm run e2e
+
       - name: Check the update manifest the build produces
         run: |
           set -euo pipefail

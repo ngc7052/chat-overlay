@@ -188,6 +188,19 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   usually means nobody is talking, not that you broke it. Use `npm run e2e`.
 - **`[hidden]` loses to any `display` rule.** Add
   `selector[hidden] { display: none !important }` when you style a container.
+- **`-webkit-app-region` is the source of most of this project's UI bugs.**
+  Three rules, each learned the hard way:
+  1. A drag region is window chrome, so **the page never sees the mouse over
+     it** — no `:hover`, no clicks. "Is the pointer over the window" therefore
+     comes from the main process (`src/main/pointer.ts`), not from CSS.
+  2. **Drawing on top of a drag region does not mask it.** An element with no
+     app-region of its own contributes nothing; only an explicit `no-drag`
+     subtracts. The settings panel, the resize corner and the scrollbar strip
+     all have to say so.
+  3. **Never resize a drag region on hover.** Chromium recomputes the region,
+     which disturbs the pointer, which drops the hover, which resizes it back —
+     a flicker loop several times a second. Hover may repaint; it may not
+     reflow. The e2e measures the bar cold and hovered to enforce it.
 - **Twitch emote ranges are code-point indexed.** Use `Array.from(text)`; an
   emoji earlier in the line shifts UTF-16 offsets.
 - GoodGame's chat endpoint needs the **trailing slash** — without it, 301.

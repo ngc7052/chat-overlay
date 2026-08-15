@@ -34,6 +34,7 @@ interface OverlayApi {
   onLocked(cb: (locked: boolean) => void): void;
   onHotkeys(cb: (s: { lock: boolean; hide: boolean }) => void): void;
   onReconnect(cb: () => void): void;
+  onPointerOver(cb: (over: boolean) => void): void;
 }
 
 interface UpdateInfo {
@@ -693,7 +694,10 @@ overlay.onUpdateError((msg) => setUpdateStatus('Check failed: ' + msg));
 /* ------------------------------------------------------------------ boot */
 
 overlay.onLocked(applyLocked);
-overlay.onReconnect(() => { clearAll(); rebuildSources(); });
+overlay.onReconnect(reconnectAll);
+// Reported by the main process rather than read from CSS :hover, which a drag
+// region would swallow. Drives the backdrop and the bar.
+overlay.onPointerOver((over) => document.body.classList.toggle('pointer-over', over));
 overlay.onHotkeys((ok) => {
   const failed: string[] = [];
   if (!ok.lock) failed.push(config.hotkeyLock);

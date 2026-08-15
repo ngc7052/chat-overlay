@@ -36,6 +36,8 @@ const api = {
   onHotkeys: (cb: (s: { lock: boolean; hide: boolean }) => void) =>
     ipcRenderer.on('state:hotkeys', (_e, s) => cb(s)),
   onReconnect: (cb: () => void) => ipcRenderer.on('action:reconnect', () => cb()),
+  onPointerOver: (cb: (over: boolean) => void) =>
+    ipcRenderer.on('state:pointerOver', (_e, over) => cb(over)),
 };
 
 export type OverlayApi = typeof api;

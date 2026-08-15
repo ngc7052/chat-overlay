@@ -62,26 +62,32 @@ export function appearanceVars(config: Config): Record<string, string> {
 
 export interface SourceStatus { state: ConnectionState; detail: string }
 
-function mark(state: ConnectionState): string {
-  switch (state) {
-    case 'online': return '●';
-    case 'error': return '▲';
-    default: return '○';
-  }
+export interface StatusDot {
+  key: string;
+  label: string;
+  state: ConnectionState;
+  /** Tooltip text; also what a screen reader gets, since the dot is a colour. */
+  title: string;
 }
 
-/** The one-line summary in the top bar. */
-export function statusLine(
+/**
+ * One dot per channel in the top bar, its colour carrying the state.
+ *
+ * The bar is chrome on an overlay, so it stays quieter than the chat it sits
+ * above: the channel name is there but revealed on hover, and the same
+ * "connected — …" line is already written into the chat itself. An empty list
+ * shows nothing at all — the hint in the chat body covers that case.
+ */
+export function statusDots(
   sources: { key: string; platform: string; channel: string }[],
   states: Map<string, SourceStatus>,
-): string {
-  if (sources.length === 0) return 'no channels configured';
+): StatusDot[] {
   return sources.map((s) => {
     const st = states.get(s.key) ?? { state: 'connecting' as ConnectionState, detail: '' };
-    const short = s.platform === 'twitch' ? 'tw' : 'gg';
-    const detail = st.detail && st.state !== 'online' ? ` (${st.detail})` : '';
-    return `${mark(st.state)} ${short}/${s.channel}${detail}`;
-  }).join('   ');
+    const label = `${s.platform === 'twitch' ? 'tw' : 'gg'}/${s.channel}`;
+    const detail = st.detail && st.state !== 'online' ? ` — ${st.detail}` : '';
+    return { key: s.key, label, state: st.state, title: `${label} — ${st.state}${detail}` };
+  });
 }
 
 /**

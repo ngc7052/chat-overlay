@@ -44,8 +44,11 @@ body { display: flex; flex-direction: column; }
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  background: var(--ui-bg);
-  border-bottom: 1px solid var(--ui-line);
+  /* No fill and no bottom rule on purpose. This bar is a control surface that
+     appears only while unlocked, not a window titlebar, and a solid strip with
+     a hard edge reads as chrome bolted onto a transparent window. The controls
+     float over the chat instead; contrast comes from their own shadow. */
+  background: transparent;
   font-size: 12px;
   font-weight: 600;
   color: var(--ui-text);
@@ -62,18 +65,56 @@ body { display: flex; flex-direction: column; }
   -webkit-app-region: drag;
   cursor: move;
 }
-#grip:hover { background: var(--ui-bg-soft); }
-#grip-title { flex: 0 0 auto; }
 #status {
   flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 400;
   font-size: 11px;
   color: var(--ui-dim);
 }
+
+/* One dot per channel: colour carries the state, the name is revealed on
+   hover. The names duplicate the "connected — …" lines already in the chat,
+   so they do not earn permanent space in the bar. */
+.src-dot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+.src-dot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ui-dim);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+}
+.src-dot.online::before { background: #3fb950; }
+.src-dot.error::before { background: #f85149; }
+.src-dot.error { cursor: pointer; }
+.src-dot.connecting::before { background: #d29922; }
+
+.src-name {
+  /* max-width does nothing to a plain inline box, which leaves the name
+     permanently expanded. */
+  display: inline-block;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width .15s ease, opacity .15s ease;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+}
+/* Revealed by hovering the window, the same signal that fades the backdrop in.
+   Hovering the bar itself is not usable: most of it is an app-region drag
+   surface, which never delivers hover to the page. */
+body:not(.locked):hover .src-name { max-width: 22ch; opacity: 1; }
 
 #bar button {
   -webkit-app-region: no-drag;
@@ -98,6 +139,9 @@ body { display: flex; flex-direction: column; }
   width: 15px;
   height: 15px;
   display: block;
+  /* The bar has no fill of its own, so the icons carry their own contrast
+     against whatever game is behind them. */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
   fill: none;
   stroke: currentColor;
   stroke-width: 2;

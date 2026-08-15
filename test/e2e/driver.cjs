@@ -6,7 +6,7 @@
  * attribute claims — an earlier bug in this project passed an attribute check
  * while the element was plainly visible on screen.
  */
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, screen } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -46,6 +46,48 @@ const findWindow = setInterval(() => {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const q = (js) => win.webContents.executeJavaScript(js);
+
+/**
+ * Put the window under the real pointer, or as far from it as the display
+ * allows.
+ *
+ * Hover cannot be faked here. Synthetic mouseLeave does not clear `:hover`
+ * while the operating system's own cursor is sitting over the window, which
+ * made the backdrop checks pass or fail depending on where the mouse happened
+ * to be left. Moving the window is the one thing that settles it, and it
+ * exercises the real hover rule rather than working around it.
+ */
+function placeWindow(where) {
+  const pt = screen.getCursorScreenPoint();
+  const area = screen.getDisplayNearestPoint(pt).workArea;
+  const [w, h] = win.getSize();
+  if (where === 'under') {
+    win.setPosition(Math.round(pt.x - w / 2), Math.round(pt.y - h / 2));
+  } else {
+    // Whichever corner is furthest from the pointer, kept on screen.
+    const x = pt.x > area.x + area.width / 2 ? area.x : area.x + area.width - w;
+    const y = pt.y > area.y + area.height / 2 ? area.y : area.y + area.height - h;
+    win.setPosition(Math.round(x), Math.round(y));
+  }
+  // Chromium re-evaluates hover on the next mouse event, so nudge it.
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(w / 2), y: Math.round(h / 2) });
+}
+
+/**
+ * Poll a page expression until it holds, up to `ms`.
+ *
+ * Synthetic mouse events and CSS transitions both settle asynchronously, and
+ * how long they take depends on the display server. A fixed sleep is either
+ * flaky or slow; this is neither, and still fails if the state never arrives.
+ */
+const until = async (js, ms = 3000) => {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (await q(js)) return true;
+    if (Date.now() > deadline) return false;
+    await wait(50);
+  }
+};
 const snap = async (name) => {
   if (!MEDIA) return;
   fs.mkdirSync(MEDIA, { recursive: true });
@@ -75,6 +117,10 @@ app.whenReady().then(async () => {
     names: Array.from(document.querySelectorAll('.msg .name')).map(n => n.textContent),
     colors: Array.from(document.querySelectorAll('.msg .name')).map(n => n.style.color),
     status: document.getElementById('status').textContent,
+    dots: Array.from(document.querySelectorAll('#status .src-dot')).map(d => d.className + ' ' + d.title),
+    // The bar is a control surface, not a titlebar: no fill, no bottom rule.
+    barBg: getComputedStyle(document.getElementById('bar')).backgroundColor,
+    barBorder: getComputedStyle(document.getElementById('bar')).borderBottomWidth,
     updateHidden: document.getElementById('btn-update').getClientRects().length === 0
   })`));
 
@@ -105,23 +151,35 @@ app.whenReady().then(async () => {
     check('twitch nickname present', state.names.includes('pixel_wraith'));
     check('exact twitch colour kept', state.colors.includes('rgb(0, 0, 255)'),
       'expected the raw #0000FF a user picked');
-    check('both channels online', /● tw\/halcyon_tv/.test(state.status) && /● gg\/vetroduy/.test(state.status), state.status);
+    check('both channels online', state.dots.length === 2 && state.dots.every((d) => /^src-dot online /.test(d)),
+      JSON.stringify(state.dots));
+    check('the dot names the channel it stands for',
+      state.dots.some((d) => d.includes('tw/halcyon_tv')) && state.dots.some((d) => d.includes('gg/vetroduy')),
+      JSON.stringify(state.dots));
   } else {
     check(`${ONLY} messages rendered`, state.msgs >= 10, `msgs=${state.msgs}`);
   }
   check('no broken images', state.brokenImages === 0, `broken=${state.brokenImages}`);
+  // The seam this replaced was a solid strip with a 1px rule, which read as a
+  // window titlebar bolted onto a transparent overlay.
+  check('the bar has no fill of its own', state.barBg === 'rgba(0, 0, 0, 0)', state.barBg);
+  check('the bar has no bottom rule', state.barBorder === '0px', state.barBorder);
   check('update button hidden with no update', state.updateHidden);
 
   await snap('overlay.png');
 
   // Backdrop: transparent unless unlocked and hovered.
-  const bgOf = () => q(`getComputedStyle(document.getElementById('chat')).backgroundColor`);
-  win.webContents.sendInputEvent({ type: 'mouseLeave', x: -10, y: -10 });
-  await wait(250);
-  check('unlocked, not hovered: no backdrop', (await bgOf()) === 'rgba(10, 12, 18, 0)');
-  win.webContents.sendInputEvent({ type: 'mouseMove', x: 280, y: 300 });
-  await wait(250);
-  check('unlocked, hovered: backdrop visible', (await bgOf()) === 'rgba(10, 12, 18, 0.55)');
+  const BG = `getComputedStyle(document.getElementById('chat')).backgroundColor`;
+  const NAME_W = `document.querySelector('#status .src-name').getBoundingClientRect().width`;
+  placeWindow('away');
+  check('unlocked, not hovered: no backdrop', await until(`${BG} === 'rgba(10, 12, 18, 0)'`),
+    await q(BG));
+  check('not hovered: channel names stay collapsed', await until(`${NAME_W} === 0`));
+  placeWindow('under');
+  check('unlocked, hovered: backdrop visible', await until(`${BG} === 'rgba(10, 12, 18, 0.55)'`),
+    await q(BG));
+  // The same hover that fades the backdrop in also names each dot's channel.
+  check('hovering reveals the channel names', await until(`${NAME_W} > 0`));
   await snap('overlay-hover.png');
 
   // Settings panel opens, closes, and swaps the cog for a back arrow.

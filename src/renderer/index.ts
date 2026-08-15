@@ -7,7 +7,7 @@ import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/type
 import { debounce, timeString, type MessagePart } from './util.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  shouldDrop, sourceDotClass, statusLine, visibleBadges, type SourceStatus,
+  shouldDrop, sourceDotClass, statusDots, visibleBadges, type SourceStatus,
 } from './view.js';
 
 /** DOM wiring. The rules it applies live in ./view and ./sources. */
@@ -284,11 +284,28 @@ function systemLine(text: string): void {
 
 /* ---------------------------------------------------------------- status */
 
+function reconnectAll(): void {
+  clearAll();
+  rebuildSources();
+}
+
 function renderStatus(): void {
-  statusEl.textContent = statusLine(
+  const dots = statusDots(
     sources.map((s) => ({ key: s.key, platform: s.platform, channel: s.channel })),
     states,
   );
+  statusEl.replaceChildren(...dots.map((d) => {
+    const el = document.createElement('span');
+    el.className = 'src-dot ' + d.state;
+    el.title = d.title;
+    // A channel that is down is the one time the bar asks to be clicked.
+    if (d.state === 'error') el.addEventListener('click', reconnectAll);
+    const name = document.createElement('span');
+    name.className = 'src-name';
+    name.textContent = d.label;
+    el.append(name);
+    return el;
+  }));
   refreshSourceDots();
 }
 
@@ -551,7 +568,7 @@ $('btn-add-source').addEventListener('click', () => {
   renderSourceRows();
 });
 $('btn-lock').addEventListener('click', () => void overlay.setLocked(true));
-$('btn-reconnect').addEventListener('click', () => { clearAll(); rebuildSources(); });
+$('btn-reconnect').addEventListener('click', reconnectAll);
 $('btn-quit').addEventListener('click', () => void overlay.quit());
 
 // Custom resize grip: a frameless transparent window has no OS resize border.

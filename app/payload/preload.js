@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('overlay', {
 
   httpJson: (url) => ipcRenderer.invoke('http:json', url),
 
+  // One-way "the renderer is up" signal; boot.js stops counting launches on it.
+  ready: () => ipcRenderer.send('renderer:ready'),
+
   updateVersion: () => ipcRenderer.invoke('update:version'),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateApply: () => ipcRenderer.invoke('update:apply'),

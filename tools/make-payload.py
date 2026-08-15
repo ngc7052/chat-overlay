@@ -55,7 +55,7 @@ def main():
 
     blob = json.dumps({"version": version, "files": files},
                       ensure_ascii=False, sort_keys=True).encode("utf-8")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with gzip.open(out, "wb", compresslevel=9) as fh:
         fh.write(blob)
 

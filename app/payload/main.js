@@ -182,7 +182,7 @@ function createWindow() {
   win.once('ready-to-show', () => {
     if (!config.hidden) win.showInactive();
     applyLock();
-    announceUpdate();   // a check may already have finished before this point
+    announceUpdate(false);   // a check may already have finished before this point
   });
 
   const persistBounds = () => {
@@ -295,10 +295,12 @@ ipcMain.handle('config:get', () => config);
 ipcMain.handle('config:set', (_e, patch) => {
   const prevLock = config.locked;
   const prevHotkeys = config.hotkeyLock + '|' + config.hotkeyHide;
+  const prevAutoCheck = !!config.autoCheckUpdates;
   config = { ...config, ...patch };
   saveConfig();
   if (config.locked !== prevLock) applyLock();
   if (config.hotkeyLock + '|' + config.hotkeyHide !== prevHotkeys) registerShortcuts();
+  if (!!config.autoCheckUpdates !== prevAutoCheck) applyAutoCheck();
   updateTrayMenu();
   return config;
 });
@@ -335,38 +337,86 @@ ipcMain.handle('app:quit', () => app.quit());
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let pendingUpdate = null;   // last check result, when a newer version exists
+let stagedVersion = null;   // already downloaded to payload-new; a restart installs it
+let checkTimer = null;      // first check after launch
+let checkInterval = null;   // periodic checks
 
-function announceUpdate() {
-  if (win && !win.isDestroyed() && pendingUpdate) {
-    win.webContents.send('update:available', pendingUpdate);
-  }
+/** boot.js counts launches until we report in; do that once the renderer is up. */
+function markPayloadHealthy() {
+  const p = global.__overlayPayload;
+  if (p && typeof p.markHealthy === 'function') p.markHealthy();
+}
+
+function sendToWindow(channel, payload) {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+/**
+ * Tell the renderer about pendingUpdate. A version that boot.js quarantined is
+ * only surfaced when the user asked (manual check) — never as a nag — and then
+ * only as a retry inside Settings.
+ */
+function announceUpdate(manual) {
+  if (!pendingUpdate) return;
+  if (pendingUpdate.quarantined && !manual) return;
+  sendToWindow('update:available', { ...pendingUpdate, staged: pendingUpdate.version === stagedVersion });
 }
 
 async function checkForUpdates(manual) {
   try {
     const result = await updater.check();
+    const had = pendingUpdate;
     pendingUpdate = result.newer ? result : null;
-    if (pendingUpdate) announceUpdate();
-    else if (manual && win) win.webContents.send('update:none', result);
+    if (pendingUpdate) {
+      announceUpdate(manual);
+    } else if (manual || had) {
+      // Either the user asked, or something we announced earlier is no longer
+      // on offer (release pulled) — the renderer must drop its button too.
+      sendToWindow('update:none', result);
+    }
     return result;
   } catch (err) {
-    if (manual && win) win.webContents.send('update:error', err.message);
+    if (manual) sendToWindow('update:error', err.message);
     console.warn('update check failed:', err.message);
     return { error: err.message };
   }
 }
 
+/** (Re)arm the background checks from config.autoCheckUpdates; safe to call any time. */
+function applyAutoCheck() {
+  clearTimeout(checkTimer);
+  clearInterval(checkInterval);
+  checkTimer = null;
+  checkInterval = null;
+  if (!config.autoCheckUpdates) return;
+  // Give the chat connections the first few seconds to themselves.
+  checkTimer = setTimeout(() => checkForUpdates(false), 8000);
+  checkInterval = setInterval(() => checkForUpdates(false), CHECK_INTERVAL_MS);
+}
+
 ipcMain.handle('update:check', () => checkForUpdates(true));
 
+// Errors come back as { error } rather than a rejection so the renderer shows
+// our message, not Electron's "Error invoking remote method …" wrapper.
 ipcMain.handle('update:apply', async () => {
-  if (!pendingUpdate) throw new Error('nothing to update to');
-  if (!pendingUpdate.url) {
-    // Release carries no payload asset — the runtime itself must have changed.
-    shell.openExternal(pendingUpdate.page || 'https://github.com/ngc7052/chat-overlay/releases/latest');
-    return { manual: true };
+  try {
+    if (!pendingUpdate) throw new Error('nothing to update to');
+    if (!pendingUpdate.url) {
+      // Release carries no payload asset — the runtime itself must have changed.
+      shell.openExternal(pendingUpdate.page || 'https://github.com/ngc7052/chat-overlay/releases/latest');
+      return { manual: true };
+    }
+    if (stagedVersion === pendingUpdate.version) {
+      // Already on disk from an earlier click; only the restart is missing.
+      return { staged: true, version: stagedVersion };
+    }
+    const staged = await updater.download(pendingUpdate.url, pendingUpdate.version);
+    stagedVersion = staged.version;
+    return { staged: true, version: staged.version };
+  } catch (err) {
+    console.warn('update failed:', err.message);
+    return { error: err.message };
   }
-  const staged = await updater.download(pendingUpdate.url, pendingUpdate.version);
-  return { staged: true, version: staged.version };
 });
 
 ipcMain.handle('update:restart', () => updater.restart());
@@ -376,6 +426,10 @@ ipcMain.handle('update:version', () => ({
   bundled: global.__overlayPayload ? global.__overlayPayload.bundledVersion : null,
   usingStaged: !!(global.__overlayPayload && global.__overlayPayload.usingStaged),
 }));
+
+ipcMain.on('renderer:ready', (e) => {
+  if (win && !win.isDestroyed() && e.sender === win.webContents) markPayloadHealthy();
+});
 
 ipcMain.handle('shell:open', (_e, url) => {
   if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -432,12 +486,7 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     createTray();
     registerShortcuts();
-
-    if (config.autoCheckUpdates) {
-      // Give the chat connections the first few seconds to themselves.
-      setTimeout(() => checkForUpdates(false), 8000);
-      setInterval(() => checkForUpdates(false), CHECK_INTERVAL_MS);
-    }
+    applyAutoCheck();
   });
 
   app.on('window-all-closed', () => app.quit());

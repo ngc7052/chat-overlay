@@ -116,16 +116,22 @@ in `app/` (which becomes `resources\app\` inside a build):
 
 | File | What it does |
 |---|---|
-| `main.js` | window, click-through, tray, hotkeys, config, HTTP proxy |
-| `preload.js` | the small bridge the page is allowed to call |
-| `renderer/sources.js` | GoodGame + Twitch protocol clients |
-| `renderer/emotes.js` | GoodGame smiles, 7TV / BTTV / FFZ, Twitch badges |
-| `renderer/app.js` | rendering and the settings panel |
-| `renderer/util.js` | colours, URL splitting, small helpers |
-| `renderer/style.css` | all the styling |
+| `boot.js` | picks the newest app payload and starts it (see *Updates*) |
+| `payload/main.js` | window, click-through, tray, hotkeys, config, HTTP proxy, updater wiring |
+| `payload/updater.js` | release check, download, verification |
+| `payload/preload.js` | the small bridge the page is allowed to call |
+| `payload/renderer/sources.js` | GoodGame + Twitch protocol clients |
+| `payload/renderer/emotes.js` | GoodGame smiles, 7TV / BTTV / FFZ, Twitch badges |
+| `payload/renderer/app.js` | rendering and the settings panel |
+| `payload/renderer/util.js` | colours, URL splitting, small helpers |
+| `payload/renderer/style.css` | all the styling |
+| `payload/version.json` | the app version — the one place it is set |
 
-To tweak an existing install, edit `resources\app\` in place and restart the exe
-— no rebuild needed.
+To tweak an existing install, edit `resources\app\payload\` in place and restart
+the exe — no rebuild needed. One catch: if you have ever applied an in-app
+update, the newer copy in `%APPDATA%\ChatOverlay\payload` wins over
+`resources\app\payload`, so edit that one instead (or delete it to go back to
+what shipped).
 
 ## Updates
 
@@ -147,23 +153,37 @@ payload is newest:
 | `resources\app\payload` | the version that shipped in the zip |
 | `%APPDATA%\ChatOverlay\payload` | a newer one downloaded by the updater |
 
-Because the downloaded payload lands somewhere else entirely, an update never
-overwrites a file the running process has open — the usual reason self-updating
-breaks on Windows.
+The updater never writes into either of those. It downloads into
+`%APPDATA%\ChatOverlay\payload-new`, SHA-256 checks every file after it is
+written, and only when all of them verify marks the directory complete. On the
+next launch `boot.js` moves it into place — before anything is loaded from it —
+so an update never overwrites a file the running process has open (the usual
+reason self-updating breaks on Windows), and a download or move interrupted at
+any point is finished or thrown away next time rather than left half-applied.
 
-Every file in the package is SHA-256 checked after it is written, and the swap
-only happens once all of them verify. If a payload fails to start three times —
-or throws immediately — it is quarantined and the bundled version takes over, so
-a broken release cannot brick an install.
+Every launch of a downloaded payload is counted until the payload reports that
+its window is up. One that throws while loading, or crashes before that point,
+is quarantined immediately and the app restarts on the bundled version; one that
+silently never comes up is quarantined after three launches. A quarantined
+version is remembered and not offered again — you can still re-download it by
+hand from Settings → **Updates** if you want to retry — so a broken release
+cannot brick an install or nag you into reinstalling it.
 
 ### Publishing one
 
 ```bash
-# bump app/payload/version.json first
+# 1. bump app/payload/version.json — the only place the version is set
+# 2. build; the last line prints the exact release command for that version
 ./build.sh --zip
 gh release create v1.0.1 dist/ChatOverlay.zip dist/app-payload.json.gz \
-  --title "ChatOverlay v1.0.1" --notes "..."
+  --title "ChatOverlay 1.0.1" --notes "..."
 ```
+
+The release **tag must be `v` + the version in `version.json`** (`build.sh`
+writes it to `dist/RELEASE_TAG` and refuses to build from a commit tagged with
+anything else). Installs decide whether to update from the tag and refuse to
+install a package whose version disagrees with it, so a tag that drifts from
+`version.json` would make every install offer an update that can never succeed.
 
 Both assets matter: `ChatOverlay.zip` is for new users, `app-payload.json.gz` is
 what existing installs fetch. A release without the payload asset falls back to

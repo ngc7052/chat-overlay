@@ -111,27 +111,44 @@ Example — thinner lines, lowercase names, bigger emotes:
 
 ## Source layout
 
-Plain JavaScript — no bundler, no build step, no dependencies. Everything lives
-in `app/` (which becomes `resources\app\` inside a build):
+TypeScript, compiled and bundled into `app/` (which becomes `resources\app\`
+inside a build). `app/` and `dist/` are build output and are not in git.
 
-| File | What it does |
+| Path | What it does |
 |---|---|
-| `boot.js` | picks the newest app payload and starts it (see *Updates*) |
-| `payload/main.js` | window, click-through, tray, hotkeys, config, HTTP proxy, updater wiring |
-| `payload/updater.js` | release check, download, verification |
-| `payload/preload.js` | the small bridge the page is allowed to call |
-| `payload/renderer/sources.js` | GoodGame + Twitch protocol clients |
-| `payload/renderer/emotes.js` | GoodGame smiles, 7TV / BTTV / FFZ, Twitch badges |
-| `payload/renderer/app.js` | rendering and the settings panel |
-| `payload/renderer/util.js` | colours, URL splitting, small helpers |
-| `payload/renderer/style.css` | all the styling |
-| `payload/version.json` | the app version — the one place it is set |
+| `src/boot/` | picks the newest app payload and starts it (see *Updates*) |
+| `src/boot/payload.ts` | payload selection, promotion and quarantine rules |
+| `src/main/` | window, click-through, tray, hotkeys, IPC |
+| `src/main/config.ts` | defaults, migrations, the invariants the UI relies on |
+| `src/main/updater/` | release check, download, manifest safety rules |
+| `src/preload/` | the small bridge the page is allowed to call |
+| `src/renderer/sources/` | GoodGame + Twitch protocol clients |
+| `src/renderer/emotes/` | GoodGame smiles, 7TV / BTTV / FFZ, Twitch badges |
+| `src/renderer/view.ts` | what to show: filtering, formatting, status text |
+| `src/renderer/index.ts` | DOM wiring |
+| `src/shared/version.ts` | version comparison, shared by boot and the updater |
+| `static/` | `index.html`, `style.css`, icons, the app manifest |
+| `package.json` | the app version — the one place it is set |
 
-To tweak an existing install, edit `resources\app\payload\` in place and restart
-the exe — no rebuild needed. One catch: if you have ever applied an in-app
-update, the newer copy in `%APPDATA%\ChatOverlay\payload` wins over
-`resources\app\payload`, so edit that one instead (or delete it to go back to
-what shipped).
+## Development
+
+```bash
+npm install          # ELECTRON_SKIP_BINARY_DOWNLOAD=1 if you only want to test
+npm test             # unit tests
+npm run coverage     # the same, with the 100% thresholds enforced
+npm run typecheck    # tsc --noEmit
+npm run build        # compile into app/
+```
+
+The logic — protocol parsing, emote assembly, colours, config migration, update
+manifest safety, payload selection — is held at **100% statements, branches,
+functions and lines**, enforced in CI. The Electron and DOM wiring around it is
+excluded from that number deliberately: covering it would mean asserting that
+mocks were called, which passes just as happily when the app is broken. It is
+checked by running the real thing instead.
+
+Because the app is compiled, editing files inside an installed copy no longer
+works — change `src/`, run `npm run build`, and rebuild the zip.
 
 ## Updates
 
@@ -171,22 +188,24 @@ cannot brick an install or nag you into reinstalling it.
 
 ### Publishing one
 
-Releases are automatic. Bump `app/payload/version.json` — the only place the
-version is set — and merge to `master`:
+Releases are automatic. Bump the version in `package.json` — the only place it is set — and merge to
+`master`:
 
 ```json
 { "version": "1.0.1" }
 ```
 
-`.github/workflows/release.yml` runs on every push to `master` but publishes
+`.github/workflows/release.yml` runs on every push to `master` and publishes
 only when the version has no tag yet, so ordinary merges (a README fix, a bug
 fix without a bump) run it, see the tag already exists, and stop. **The version
-file is the release trigger.** It syntax-checks the app, builds, and verifies
-both artifacts before publishing — the manifest has to declare the same version
-as the tag and contain the files the updater requires, and the zip has to
-contain the exe and the bootstrapper. A bad payload asset would break updating
-for every existing install, so it is caught before the release exists rather
-than after.
+is the release trigger.**
+
+Publishing waits on the full CI job — typecheck, tests, coverage thresholds —
+then builds and verifies both artifacts: the manifest has to declare the same
+version as the tag and contain the files the updater requires, and the zip has
+to contain the exe and the bootstrapper. A bad payload asset would break
+updating for every existing install, so it is caught before the release exists
+rather than after.
 
 To build locally without publishing:
 
@@ -194,11 +213,11 @@ To build locally without publishing:
 ./build.sh --zip     # dist/ChatOverlay.zip + dist/app-payload.json.gz
 ```
 
-The release **tag must be `v` + the version in `version.json`** (`build.sh`
+The release **tag must be `v` + the version in `package.json`** (`build.sh`
 writes it to `dist/RELEASE_TAG` and refuses to build from a commit tagged with
 anything else). Installs decide whether to update from the tag and refuse to
 install a package whose version disagrees with it, so a tag that drifts from
-`version.json` would make every install offer an update that can never succeed.
+`package.json` would make every install offer an update that can never succeed.
 
 Both assets matter: `ChatOverlay.zip` is for new users, `app-payload.json.gz` is
 what existing installs fetch. A release without the payload asset falls back to
@@ -211,10 +230,11 @@ Electron runtime itself changed and a full re-download is genuinely needed.
 ./build.sh --zip      # -> dist/ChatOverlay/ and dist/ChatOverlay.zip
 ```
 
-Downloads the official Electron win32-x64 runtime, drops `app/` into
-`resources/app`, renames `electron.exe` to `ChatOverlay.exe`. Runs on Linux,
-WSL or macOS — no Windows machine, no wine, no code-signing toolchain.
-Override the runtime with `ELECTRON_VERSION=43.4.0 ./build.sh`.
+Compiles the sources, downloads the official Electron win32-x64 runtime, drops
+the result into `resources/app` and renames `electron.exe` to
+`ChatOverlay.exe`. Runs on Linux, WSL or macOS — no Windows machine, no wine, no
+code-signing toolchain. Override the runtime with
+`ELECTRON_VERSION=43.4.0 ./build.sh`.
 
 ## How it talks to the platforms
 

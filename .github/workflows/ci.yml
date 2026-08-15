@@ -1,0 +1,68 @@
+name: CI
+
+# Typecheck and tests on every push to master and every pull request. They are
+# separate jobs so a pull request shows which one failed at a glance, and so
+# they run in parallel.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  # The release workflow calls this too, so nothing is ever published without
+  # both jobs having passed on exactly the commit being released.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        # The Electron binary is only needed to run the app, not to typecheck
+        # against its types, and skipping it saves ~100 MB per run.
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
+      - run: npm run typecheck
+
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
+
+      - name: Test with coverage
+        # vitest.config.ts holds the logic modules at 100%; a drop fails here
+        # rather than quietly eroding.
+        run: npm run coverage
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the update manifest the build produces
+        run: |
+          set -euo pipefail
+          node dist/tools/make-payload.cjs app/payload dist/app-payload.json.gz
+          node -e "
+            const { gunzipSync } = require('node:zlib');
+            const fs = require('node:fs');
+            const m = JSON.parse(gunzipSync(fs.readFileSync('dist/app-payload.json.gz')).toString());
+            const version = require('./package.json').version;
+            if (m.version !== version) throw new Error(\`manifest v\${m.version} != package v\${version}\`);
+            for (const f of ['main.js', 'preload.js', 'version.json', 'renderer/index.html']) {
+              if (!m.files[f]) throw new Error('manifest missing ' + f);
+            }
+            console.log('manifest ok:', Object.keys(m.files).length, 'files');
+          "

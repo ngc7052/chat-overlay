@@ -4,6 +4,7 @@ import {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { activeSources, defaultConfig, parseConfig } from './config.js';
+import { resolveEndpoints, rewriteApiUrl } from './endpoints.js';
 import type { Config, PayloadHandoff, ReleaseInfo } from './types.js';
 import { createUpdater } from './updater/index.js';
 
@@ -380,6 +381,8 @@ export const ALLOWED_HOSTS = new Set([
   'api.ivr.fi',
 ]);
 
+ipcMain.handle('env:endpoints', () => resolveEndpoints(process.env));
+
 ipcMain.handle('http:json', async (_e, url: string) => {
   let parsed: URL;
   try {
@@ -390,6 +393,9 @@ ipcMain.handle('http:json', async (_e, url: string) => {
   if (parsed.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsed.hostname)) {
     throw new Error('host not allowed: ' + parsed.hostname);
   }
+  // The allowlist is checked against the real host first, so the override can
+  // only ever redirect a request the app was already allowed to make.
+  url = rewriteApiUrl(url, process.env['OVERLAY_TEST_API_BASE']);
   const res = await net.fetch(url, {
     headers: { Accept: 'application/json', 'User-Agent': 'ChatOverlay/1.0' },
   });

@@ -100,6 +100,18 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # Prefer this version's CHANGELOG section; fall back to the blurb alone.
+          node -e "
+            const fs = require('node:fs');
+            const version = process.argv[1];
+            let body = '';
+            try {
+              const log = fs.readFileSync('CHANGELOG.md', 'utf8');
+              const m = new RegExp('^## ' + version.replace(/\./g, '\\.') + '\\s*$([\\s\\S]*?)(?=^## |\\Z)', 'm').exec(log);
+              if (m) body = m[1].trim();
+            } catch {}
+            fs.writeFileSync('changelog-section.md', body);
+          " "${{ steps.v.outputs.version }}"
           cat > notes.md <<'EOF'
           Download **`ChatOverlay.zip`** below, unzip anywhere, run `ChatOverlay.exe`.
           Windows 10/11 64-bit — no installer, no Node.js, no admin rights.
@@ -111,6 +123,10 @@ jobs:
 
           ---
           EOF
+          if [ -s changelog-section.md ]; then
+            printf '\n## Changes\n\n' >> notes.md
+            cat changelog-section.md >> notes.md
+          fi
           gh release create "${{ steps.v.outputs.tag }}" \
             dist/ChatOverlay.zip dist/app-payload.json.gz \
             --target "$GITHUB_SHA" \

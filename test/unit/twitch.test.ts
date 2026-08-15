@@ -58,6 +58,11 @@ describe('twitchEmoteUrl', () => {
       'https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0',
     );
   });
+
+  it('honours an override base, so the e2e can stay offline', () => {
+    expect(twitchEmoteUrl('25', 'http://127.0.0.1:9/emoticons/v2/'))
+      .toBe('http://127.0.0.1:9/emoticons/v2/25/default/dark/2.0');
+  });
 });
 
 describe('buildBadges', () => {
@@ -317,6 +322,13 @@ describe('TwitchSource.buildParts', () => {
       { type: 'emote', url: twitchEmoteUrl('25'), name: 'Kappa' },
       { type: 'text', value: ' hey ' },
       { type: 'emote', url: twitchEmoteUrl('25'), name: 'Kappa' },
+    ]);
+  });
+
+  it('draws native emotes from the override base when one is set', () => {
+    const local = harness({ emoteBase: 'http://127.0.0.1:9/emoticons/v2/' }).source;
+    expect(local.buildParts('Kappa', '25:0-4')).toEqual([
+      { type: 'emote', url: 'http://127.0.0.1:9/emoticons/v2/25/default/dark/2.0', name: 'Kappa' },
     ]);
   });
 

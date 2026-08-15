@@ -25,8 +25,10 @@ export const TWITCH_BADGES: Record<string, { kind: string; label: string }> = {
   partner: { kind: 'premium', label: 'PTNR' },
 };
 
-export function twitchEmoteUrl(id: string): string {
-  return 'https://static-cdn.jtvnw.net/emoticons/v2/' + id + '/default/dark/2.0';
+export const TWITCH_EMOTE_BASE = 'https://static-cdn.jtvnw.net/emoticons/v2/';
+
+export function twitchEmoteUrl(id: string, base: string = TWITCH_EMOTE_BASE): string {
+  return base + id + '/default/dark/2.0';
 }
 
 /** Turn the `badges` / `badge-info` tags into what the renderer draws. */
@@ -62,10 +64,12 @@ export class TwitchSource extends BaseSource {
   readonly platform: PlatformName = 'twitch';
   roomId: string | null = null;
   private keepalive: unknown = null;
+  private emoteBase: string;
 
   constructor(opts: SourceOptions) {
     super(opts);
     this.channel = String(opts.channel || '').toLowerCase().replace(/^#/, '');
+    this.emoteBase = opts.emoteBase ?? TWITCH_EMOTE_BASE;
   }
 
   connect(): void {
@@ -73,7 +77,7 @@ export class TwitchSource extends BaseSource {
     this.closeSocket();
     this.status('connecting');
 
-    const ws = this.createSocket(TWITCH_WS_URL);
+    const ws = this.createSocket(this.wsUrl ?? TWITCH_WS_URL);
     this.ws = ws;
 
     ws.onopen = () => {
@@ -268,7 +272,7 @@ export class TwitchSource extends BaseSource {
         flush();
         parts.push({
           type: 'emote',
-          url: twitchEmoteUrl(mark.id),
+          url: twitchEmoteUrl(mark.id, this.emoteBase),
           name: chars.slice(i, mark.end + 1).join(''),
         });
         i = mark.end;

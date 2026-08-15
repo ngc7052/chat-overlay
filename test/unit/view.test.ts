@@ -97,6 +97,12 @@ describe('badges', () => {
     expect(badgeRendering(withArt, config({ badgeStyle: 'text' }))).toBe('chip');
   });
 
+  it('draws a GoodGame icon as an image like any other badge', () => {
+    // These are white monochrome SVGs, so an <img> renders them correctly.
+    const ggIcon: Badge = { kind: 'gg-icon', label: 'STAR', url: 'https://x/s.svg', title: 'star' };
+    expect(badgeRendering(ggIcon, config({ badgeStyle: 'icons' }))).toBe('image');
+  });
+
   it('hides badges entirely when switched off', () => {
     const msg = message({ badges: [withArt] });
     expect(visibleBadges(msg, config({ badgeStyle: 'off' }))).toEqual([]);

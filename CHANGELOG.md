@@ -1,5 +1,59 @@
 # chat-overlay
 
+## 1.2.0
+
+Released 2026-08-16.
+
+### Changed
+
+- **The top bar is no longer a titlebar.** It had a solid fill and a rule under
+  it, which drew a hard seam across a transparent overlay and made the chrome
+  heavier than the chat below it. At rest it is now invisible; hovering the
+  overlay raises a translucent strip with a drag handle, and moving the pointer
+  away takes it back off.
+- **Drag the window by the chat.** The whole bar moves it, empty space
+  included, and so does the feed itself while unlocked — no aiming for a strip.
+  The scrollbar and the resize corner stay out of it.
+- **Channel status is a coloured dot per channel** — green connected, amber
+  connecting, red down — with the channel name revealed on hover. The
+  `ChatOverlay` label is gone; it was the boldest text on screen and said
+  nothing you did not know, and the names were repeating the `connected — …`
+  lines already in the chat.
+- **Settings is a short list of collapsible groups** instead of one long
+  scroll. Channels is open to begin with, the rest are headings you expand, and
+  which ones you left open is remembered.
+- **Bar icons are larger targets**, and the settings scroll track no longer
+  runs up behind them.
+
+### Fixed
+
+- **GoodGame smiles were blurry.** The catalogue took GoodGame's `small`
+  artwork, 18px tall, while the overlay draws emotes at around 27px — more on a
+  scaled display. The `big` variant is exactly twice the size and is what the
+  site itself uses. Twitch and 7TV emotes were already high-resolution, which
+  is why only GoodGame looked soft.
+- Settings had two ways out, overlapping in the same corner: the panel carried
+  its own "Back to chat" button underneath the bar's back arrow.
+- Nothing in the settings panel responded once the chat became draggable —
+  drawing on top of a drag region does not mask it, so every click was read as
+  the start of a window drag.
+
+### Internal
+
+- **The update path is tested end to end**, against a real filesystem, a real
+  HTTP server and a real Electron process: a package that is truncated,
+  tampered with, mis-versioned or carrying an escaping path is refused before
+  anything is written; the running payload is never touched; a downloaded one
+  is installed and actually run; and one that fails to start, or throws while
+  loading, is quarantined so the bundled version takes over. This is the code
+  that decides which app you run, and a wrong answer bricks an install.
+- **Six end-to-end scenarios**, including a connection dropped without a close
+  frame and every emote provider unreachable at once. Neither costs a message.
+- TypeScript 7, vitest 4, esbuild 0.28; jsdom dropped as unused. Between them
+  they found a real type error and four paths that were counted as covered
+  while never running. All development-only — the app still ships with no
+  runtime dependencies.
+
 ## 1.1.0
 
 Released 2026-08-15.

@@ -1,5 +1,38 @@
 # chat-overlay
 
+## 1.1.0
+
+Released 2026-08-15.
+
+### Added
+
+- **GoodGame chat icons.** Messages now show the icon the protocol actually
+  sends — star, cup, eagle and the rest — plus a GoodGame+ badge for the tier
+  held. Unlike Twitch, GoodGame publishes no badge API, so the name-to-file
+  mapping was read out of their own stylesheet and confirmed against live
+  traffic. Roles that have no icon of their own keep their text chip.
+- **Each channel's own subscriber artwork.** Channels ship an image per
+  subscription tier and the tier travels on the message, which is what makes a
+  real GoodGame chat colourful; channels without artwork fall back to the
+  shared icon.
+
+### Changed
+
+- **End-to-end tests no longer depend on anyone being live.** A local fake
+  server speaks both chat protocols and serves the emote, badge and icon
+  artwork, so a run is reproducible, needs no network, and either passes or has
+  found a bug. The README's screenshots and demos are captured from that same
+  run.
+- **That run draws the platforms' real artwork**, vendored and served from
+  disk. The generated stand-ins it used first looked plausible while telling
+  you nothing: a catalogue matching the wrong emote would have drawn a
+  placeholder just as happily.
+- **Twitch's own emotes arrive the way Twitch sends them**, as character ranges
+  on the `emotes` tag, so the code-point-indexed range parser is exercised by a
+  real run rather than only by unit tests.
+- **A simpler README**, example-led, with a separate demo per platform showing
+  around fifteen different emotes each.
+
 ## 1.0.1
 
 Released 2026-08-15.

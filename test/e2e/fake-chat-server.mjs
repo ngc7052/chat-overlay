@@ -75,8 +75,16 @@ const fixtures = (origin) => ({
       id, name, data: { host: { url: `${origin}/7tv/${id}`, files: [{ name: '2x.webp' }] } },
     })),
   },
+  // Both variants, as GoodGame publishes them: 18px and 36px. The client is
+  // expected to take the big one.
   ggSmiles: GG_SMILES.map((key) => ({
-    key, channel_id: 0, animated: 0, images: { small: `${origin}/gg-smiles/${key}.png` },
+    key,
+    channel_id: 0,
+    animated: 0,
+    images: {
+      small: `${origin}/gg-smiles/${key}.png`,
+      big: `${origin}/gg-smiles/${key}-big.png`,
+    },
   })),
 });
 

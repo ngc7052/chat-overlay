@@ -81,10 +81,12 @@ export function createAssetApi(deps: AssetDeps): AssetApi {
     const cachedMemory = memory.get('gg') as GgSmile[] | undefined;
     if (cachedMemory) return cachedMemory;
 
-    let list = cacheGet<GgSmile[]>('gg-smiles-v1', GG_TTL_MS);
+    // v2: entries hold the big artwork now, so a v1 cache would keep serving
+    // the 18px one for up to twelve hours after the fix landed.
+    let list = cacheGet<GgSmile[]>('gg-smiles-v2', GG_TTL_MS);
     if (!list) {
       list = normaliseGgCatalogue(await deps.httpJson(URLS.ggSmiles));
-      cacheSet('gg-smiles-v1', list);
+      cacheSet('gg-smiles-v2', list);
     }
     memory.set('gg', list);
     return list;

@@ -228,6 +228,8 @@ app.whenReady().then(async () => {
     emoteNames: Array.from(new Set(Array.from(document.querySelectorAll('.msg img.emote')).map(i => i.alt))),
     emotePairs: Array.from(new Map(Array.from(document.querySelectorAll('.msg img.emote')).map(i => [i.alt, i.currentSrc || i.src])).entries()),
     nativeEmotes: document.querySelectorAll('.msg img.emote[src*="/emoticons/v2/"]').length,
+    ggEmotes: document.querySelectorAll('.msg img.emote[src*="/gg-smiles/"]').length,
+    ggBigEmotes: document.querySelectorAll('.msg img.emote[src*="-big.png"]').length,
     brokenImages: Array.from(document.querySelectorAll('.msg img')).filter(i => i.complete && i.naturalWidth === 0).length,
     urls: document.querySelectorAll('.msg .url').length,
     names: Array.from(document.querySelectorAll('.msg .name')).map(n => n.textContent),
@@ -261,6 +263,11 @@ app.whenReady().then(async () => {
       `distinct=${state.emoteNames.length} (${state.emoteNames.join(', ')})`);
     check("twitch's own emotes rendered from the emotes tag", state.nativeEmotes >= 5,
       `native=${state.nativeEmotes}`);
+    // GoodGame's "small" is 18px and the overlay draws at ~27; the big variant
+    // is the one that does not arrive blurred.
+    check('goodgame smiles use the high-resolution variant',
+      state.ggEmotes > 0 && state.ggEmotes === state.ggBigEmotes,
+      `gg=${state.ggEmotes} big=${state.ggBigEmotes}`);
     check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
     check('goodgame nickname present', state.names.includes('КотБаюн'));
     check('twitch nickname present', state.names.includes('pixel_wraith'));

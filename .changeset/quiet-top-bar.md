@@ -8,9 +8,9 @@ the chrome heavier than the chat it sits above. It is now unfilled and
 seamless, with the controls floating over the chat and carrying their own
 shadow for contrast.
 
-Because there is no strip to aim at any more, a drag handle and a faint fill
-appear whenever the pointer is over the overlay, and the whole bar — empty
-space included — moves the window.
+Hovering the overlay raises the strip back: a translucent band across the top
+with a drag handle, which is what you grab to move the window. The whole bar,
+empty space included, drags. Move the pointer away and it is gone again.
 
 The `ChatOverlay` label is gone; it was the boldest text on screen and told you
 nothing. Channel status is now one coloured dot per channel — green connected,

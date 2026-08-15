@@ -294,16 +294,24 @@ function renderStatus(): void {
     sources.map((s) => ({ key: s.key, platform: s.platform, channel: s.channel })),
     states,
   );
-  statusEl.replaceChildren(...dots.map((d) => {
-    const el = document.createElement('span');
-    el.className = 'src-dot ' + d.state;
-    el.title = d.title;
+  // Dots and names are two groups, not one pair each: the names live in a
+  // zero-width box and paint past its edge, so revealing them cannot move the
+  // dots or resize the bar. See style.css for why that matters.
+  const dotRow = document.createElement('span');
+  dotRow.className = 'src-dots';
+  const nameRow = document.createElement('span');
+  nameRow.className = 'src-names';
+  for (const d of dots) {
+    const dot = document.createElement('span');
+    dot.className = 'src-dot ' + d.state;
+    dot.title = d.title;
+    dotRow.append(dot);
     const name = document.createElement('span');
     name.className = 'src-name';
     name.textContent = d.label;
-    el.append(name);
-    return el;
-  }));
+    nameRow.append(name);
+  }
+  statusEl.replaceChildren(dotRow, nameRow);
   refreshSourceDots();
 }
 

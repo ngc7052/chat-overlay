@@ -126,8 +126,7 @@ app.whenReady().then(async () => {
     colors: Array.from(document.querySelectorAll('.msg .name')).map(n => n.style.color),
     status: document.getElementById('status').textContent,
     dots: Array.from(document.querySelectorAll('#status .src-dot')).map(d => d.className + ' ' + d.title),
-    // The bar is a control surface, not a titlebar: no fill, no bottom rule.
-    barBg: getComputedStyle(document.getElementById('bar')).backgroundColor,
+    // A border would resize the bar; the separator must be a box-shadow.
     barBorder: getComputedStyle(document.getElementById('bar')).borderBottomWidth,
     updateHidden: document.getElementById('btn-update').getClientRects().length === 0
   })`));
@@ -168,17 +167,16 @@ app.whenReady().then(async () => {
     check(`${ONLY} messages rendered`, state.msgs >= 10, `msgs=${state.msgs}`);
   }
   check('no broken images', state.brokenImages === 0, `broken=${state.brokenImages}`);
-  // The seam this replaced was a solid strip with a 1px rule, which read as a
-  // window titlebar bolted onto a transparent overlay.
-  check('the bar has no fill of its own', state.barBg === 'rgba(0, 0, 0, 0)', state.barBg);
-  check('the bar has no bottom rule', state.barBorder === '0px', state.barBorder);
+  check('the bar separator is a shadow, not a border', state.barBorder === '0px', state.barBorder);
   check('update button hidden with no update', state.updateHidden);
 
   await snap('overlay.png');
 
   // Backdrop: transparent unless unlocked and hovered.
   const BG = `getComputedStyle(document.getElementById('chat')).backgroundColor`;
-  const NAME_OPACITY = `getComputedStyle(document.querySelector('#status .src-name')).opacity`;
+  const NAME_OPACITY = `getComputedStyle(document.querySelector('#status .src-names')).opacity`;
+  const BAR_BG = `getComputedStyle(document.getElementById('bar')).backgroundColor`;
+  const BAR_SHADOW = `getComputedStyle(document.getElementById('bar')).boxShadow`;
   const BAR_LAYOUT = `JSON.stringify(['bar', 'grip', 'status'].map((id) => {
     const r = document.getElementById(id).getBoundingClientRect();
     return [Math.round(r.width), Math.round(r.height)];
@@ -187,6 +185,10 @@ app.whenReady().then(async () => {
   check('unlocked, not hovered: no backdrop', await until(`${BG} === 'rgba(10, 12, 18, 0)'`),
     await q(BG));
   check('not hovered: channel names are invisible', await until(`${NAME_OPACITY} === '0'`));
+  // At rest the bar is not there at all: no strip, no seam, just the chat.
+  check('not hovered: the bar is invisible',
+    await until(`${BAR_BG} === 'rgba(0, 0, 0, 0)' && ${BAR_SHADOW} === 'none'`),
+    `${await q(BAR_BG)} / ${await q(BAR_SHADOW)}`);
   const layoutCold = await q(BAR_LAYOUT);
   placeWindow('under');
   check('unlocked, hovered: backdrop visible', await until(`${BG} === 'rgba(10, 12, 18, 0.55)'`),
@@ -199,6 +201,10 @@ app.whenReady().then(async () => {
   // the bar unusable. Hover may repaint; it may not reflow.
   check('hovering does not change the bar layout', (await q(BAR_LAYOUT)) === layoutCold,
     `cold=${layoutCold} hot=${await q(BAR_LAYOUT)}`);
+  // What the bar is for: something solid to aim at and drag the window by.
+  check('hovering raises the strip to drag by',
+    await until(`${BAR_BG} !== 'rgba(0, 0, 0, 0)' && ${BAR_SHADOW}.includes('inset')`),
+    `${await q(BAR_BG)} / ${await q(BAR_SHADOW)}`);
   check('hovering shows where to grab the window',
     await until(`getComputedStyle(document.getElementById('drag-handle')).opacity > 0.5`));
   await snap('overlay-hover.png');

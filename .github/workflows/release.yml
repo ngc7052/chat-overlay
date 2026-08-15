@@ -18,7 +18,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing is published unless typecheck, tests and coverage pass.
+  test:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +34,7 @@ jobs:
         id: v
         run: |
           set -euo pipefail
-          VERSION=$(python3 -c "import json;print(json.load(open('app/payload/version.json'))['version'])")
+          VERSION=$(node -p "require('./package.json').version")
           # Single source of truth for the runtime version lives in build.sh.
           ELECTRON=$(grep -oP 'ELECTRON_VERSION:-\K[0-9.]+' build.sh)
           echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
@@ -37,18 +42,21 @@ jobs:
           echo "electron=$ELECTRON" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::v$VERSION is already released — bump app/payload/version.json to publish a new one"
+            echo "::notice::v$VERSION is already released — bump package.json to publish a new one"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "::notice::v$VERSION has no tag yet — building a release"
           fi
 
-      - name: Syntax-check the app
+      - uses: actions/setup-node@v4
         if: steps.v.outputs.publish == 'true'
-        run: |
-          set -euo pipefail
-          find app -name '*.js' -print0 | xargs -0 -n1 node --check
-          python3 -c "import ast,sys; ast.parse(open('tools/make-payload.py').read())"
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.v.outputs.publish == 'true'
+        run: ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci
 
       - name: Cache Electron runtime
         if: steps.v.outputs.publish == 'true'

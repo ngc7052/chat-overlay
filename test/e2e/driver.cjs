@@ -12,6 +12,8 @@ const path = require('node:path');
 
 const PROFILE = process.env.OVERLAY_E2E_PROFILE;
 const MEDIA = process.env.OVERLAY_E2E_MEDIA;
+const PREFIX = process.env.OVERLAY_E2E_PREFIX || '';
+const ONLY = process.env.OVERLAY_E2E_ONLY || '';
 app.setPath('userData', PROFILE);
 
 require(path.join(__dirname, '..', '..', 'app', 'boot.js'));
@@ -47,7 +49,7 @@ const q = (js) => win.webContents.executeJavaScript(js);
 const snap = async (name) => {
   if (!MEDIA) return;
   fs.mkdirSync(MEDIA, { recursive: true });
-  fs.writeFileSync(path.join(MEDIA, name), (await win.capturePage()).toPNG());
+  fs.writeFileSync(path.join(MEDIA, PREFIX + name), (await win.capturePage()).toPNG());
 };
 
 app.whenReady().then(async () => {
@@ -77,18 +79,22 @@ app.whenReady().then(async () => {
     msgs: state.msgs, tw: state.tw, gg: state.gg, badges: state.badges, ggIcons: state.ggIcons, emotes: state.emotes,
   }));
 
-  check('both platforms rendered', state.tw > 0 && state.gg > 0, `tw=${state.tw} gg=${state.gg}`);
-  check('every scripted message arrived', state.msgs >= 12, `msgs=${state.msgs}`);
-  check('twitch badge artwork rendered', state.badges >= 3, `badges=${state.badges}`);
-  check('goodgame icons rendered', state.ggIcons >= 3, `ggIcons=${state.ggIcons}`);
-  check('emotes rendered', state.emotes >= 2, `emotes=${state.emotes}`);
+  if (!ONLY) {
+    check('both platforms rendered', state.tw > 0 && state.gg > 0, `tw=${state.tw} gg=${state.gg}`);
+    check('every scripted message arrived', state.msgs >= 25, `msgs=${state.msgs}`);
+    check('twitch badge artwork rendered', state.badges >= 3, `badges=${state.badges}`);
+    check('goodgame icons rendered', state.ggIcons >= 3, `ggIcons=${state.ggIcons}`);
+    check('emotes rendered', state.emotes >= 2, `emotes=${state.emotes}`);
+    check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
+    check('goodgame nickname present', state.names.includes('КотБаюн'));
+    check('twitch nickname present', state.names.includes('pixel_wraith'));
+    check('exact twitch colour kept', state.colors.includes('rgb(0, 0, 255)'),
+      'expected the raw #0000FF a user picked');
+    check('both channels online', /● tw\/halcyon_tv/.test(state.status) && /● gg\/vetroduy/.test(state.status), state.status);
+  } else {
+    check(`${ONLY} messages rendered`, state.msgs >= 10, `msgs=${state.msgs}`);
+  }
   check('no broken images', state.brokenImages === 0, `broken=${state.brokenImages}`);
-  check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
-  check('goodgame nickname present', state.names.includes('marked0ne'));
-  check('twitch nickname present', state.names.includes('nine_volt'));
-  check('exact twitch colour kept', state.colors.includes('rgb(0, 0, 255)'),
-    'expected the raw #0000FF a user picked');
-  check('both channels online', /● tw\/aurelia_tv/.test(state.status) && /● gg\/fakestream/.test(state.status), state.status);
   check('update button hidden with no update', state.updateHidden);
 
   await snap('overlay.png');
@@ -113,7 +119,7 @@ app.whenReady().then(async () => {
     overflowX: document.querySelector('.settings-body').scrollWidth - document.querySelector('.settings-body').clientWidth
   })`));
   check('settings panel opens', settings.painted);
-  check('settings shows both channels', settings.rows === 2, `rows=${settings.rows}`);
+  check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 2), `rows=${settings.rows}`);
   check('settings icon swaps to back arrow', settings.back === 'block');
   check('settings does not overflow sideways', settings.overflowX === 0, `overflow=${settings.overflowX}`);
   await snap('settings.png');

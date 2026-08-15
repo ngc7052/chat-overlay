@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  channelStatusUrl, ggBadges, ggIconUrl, ggPlusIconUrl, GoodGameSource,
+  channelStatusUrl, ggBadges, ggChannelIconUrl, ggIconUrl, ggPlusIconUrl, GoodGameSource,
 } from '../../src/renderer/sources/goodgame.js';
 import type { ChatMessage, RemoveRequest, SocketLike, SourceOptions } from '../../src/renderer/sources/types.js';
 
@@ -68,6 +68,27 @@ describe('ggBadges', () => {
     expect(ggBadges({ user_rights: 20 })[0]?.url).toBeNull();
   });
 
+  it('prefers the channel\'s own subscriber artwork over the shared icon', () => {
+    // This is what makes a real GoodGame chat colourful; the shared icons are
+    // monochrome fallbacks.
+    const [badge] = ggBadges({ icon: 'star', premium: 1, channel_id: '5', resubs: { '5': 2 } });
+    expect(badge).toMatchObject({
+      kind: 'gg-icon',
+      url: 'https://goodgame.ru/files/icons/5-2-48.png',
+      title: 'subscriber',
+    });
+  });
+
+  it('falls back to the shared icon when the channel has no artwork', () => {
+    const [badge] = ggBadges({ icon: 'star', premium: 1, channel_id: '5', resubs: {} });
+    expect(badge?.url).toContain('StarFull24px.svg');
+  });
+
+  it('only substitutes artwork for the star icon', () => {
+    const [badge] = ggBadges({ icon: 'cup', channel_id: '5', resubs: { '5': 2 } });
+    expect(badge?.url).toContain('Cup24px.svg');
+  });
+
   it('renders the per-user icon GoodGame actually sends', () => {
     const badges = ggBadges({ icon: 'star', premium: 1 });
     expect(badges).toEqual([{
@@ -95,6 +116,32 @@ describe('ggBadges', () => {
   it('puts the role first, then the icon', () => {
     expect(ggBadges({ user_rights: 20, icon: 'star' }).map((b) => b.kind))
       .toEqual(['broadcaster', 'gg-icon']);
+  });
+});
+
+describe('ggChannelIconUrl', () => {
+  it('builds the channel-specific subscriber icon from the tier', () => {
+    // The tier lives in resubs, keyed by the channel the message came from.
+    expect(ggChannelIconUrl('5', { '5': 1 }))
+      .toBe('https://goodgame.ru/files/icons/5-1-48.png');
+    expect(ggChannelIconUrl('1644', { '1644': 3 }))
+      .toBe('https://goodgame.ru/files/icons/1644-3-48.png');
+  });
+
+  it('clamps to the highest tier artwork that exists', () => {
+    expect(ggChannelIconUrl('5', { '5': 99 })).toContain('5-7-48.png');
+  });
+
+  it('ignores a subscription to some other channel', () => {
+    expect(ggChannelIconUrl('5', { '138653': 4 })).toBeNull();
+  });
+
+  it('returns null without a tier or a numeric channel', () => {
+    expect(ggChannelIconUrl('5', {})).toBeNull();
+    expect(ggChannelIconUrl('5', null)).toBeNull();
+    expect(ggChannelIconUrl('5', { '5': 0 })).toBeNull();
+    expect(ggChannelIconUrl('notachannel', { notachannel: 2 })).toBeNull();
+    expect(ggChannelIconUrl(undefined, { '5': 1 })).toBeNull();
   });
 });
 

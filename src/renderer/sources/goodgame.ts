@@ -38,6 +38,29 @@ export const GG_ICONS: Record<string, string> = {
 /** GoodGame+ subscribers get a badge for how many months they have held it. */
 export const GG_PLUS_TIERS = [1, 3, 6, 12, 24, 48, 96];
 
+/**
+ * Channels can replace the generic premium star with their own artwork, one
+ * image per subscription tier. This is what the site shows and why a real
+ * GoodGame chat looks colourful where the shared icons are monochrome.
+ *
+ * The tier comes from `resubs[channel_id]` on the message itself.
+ */
+export const GG_CHANNEL_ICON_BASE = 'https://goodgame.ru/files/icons/';
+export const GG_MAX_ICON_TIER = 7;
+
+export function ggChannelIconUrl(
+  channelId: unknown,
+  resubs: unknown,
+  base: string = GG_CHANNEL_ICON_BASE,
+): string | null {
+  const channel = String(channelId ?? '');
+  if (!/^\d+$/.test(channel)) return null;
+  const table = resubs && typeof resubs === 'object' ? (resubs as Record<string, unknown>) : {};
+  const tier = Number(table[channel]) || 0;
+  if (tier <= 0) return null;
+  return `${base}${channel}-${Math.min(tier, GG_MAX_ICON_TIER)}-48.png`;
+}
+
 export function ggIconUrl(name: unknown, base: string = GG_ICON_BASE): string | null {
   const file = GG_ICONS[String(name ?? '').toLowerCase()];
   return file ? base + file + '.svg' : null;
@@ -62,6 +85,7 @@ interface GgMessageData {
   staff?: unknown;
   color?: unknown;
   icon?: unknown;
+  resubs?: unknown;
   gg_plus_tier?: unknown;
   message_id?: unknown;
   timestamp?: unknown;
@@ -73,7 +97,11 @@ interface GgMessageData {
  * `icon` field — the same one the site draws. Roles keep a text chip because
  * the protocol sends no icon for them.
  */
-export function ggBadges(d: GgMessageData, iconBase: string = GG_ICON_BASE): Badge[] {
+export function ggBadges(
+  d: GgMessageData,
+  iconBase: string = GG_ICON_BASE,
+  channelIconBase: string = GG_CHANNEL_ICON_BASE,
+): Badge[] {
   const rights = Number(d.user_rights) || 0;
   const badges: Badge[] = [];
   const add = (kind: string, label: string) => badges.push({ kind, label, url: null, title: label });
@@ -82,13 +110,17 @@ export function ggBadges(d: GgMessageData, iconBase: string = GG_ICON_BASE): Bad
   else if (rights >= 20) add('broadcaster', 'HOST');
   else if (rights >= 10) add('moderator', 'MOD');
 
-  const icon = ggIconUrl(d.icon, iconBase);
+  // A channel's own subscriber artwork wins over the shared monochrome icon.
+  const channelIcon = String(d.icon) === 'star'
+    ? ggChannelIconUrl(d.channel_id, d.resubs, channelIconBase)
+    : null;
+  const icon = channelIcon ?? ggIconUrl(d.icon, iconBase);
   if (icon) {
     badges.push({
       kind: 'gg-icon',
       label: String(d.icon).toUpperCase().slice(0, 4),
       url: icon,
-      title: String(d.icon),
+      title: channelIcon ? 'subscriber' : String(d.icon),
     });
   }
 
@@ -111,10 +143,12 @@ export class GoodGameSource extends BaseSource {
   readonly platform: PlatformName = 'goodgame';
   channelId: string | null = null;
   private readonly iconBase: string;
+  private readonly channelIconBase: string;
 
   constructor(opts: SourceOptions) {
     super(opts);
     this.iconBase = opts.iconBase ?? GG_ICON_BASE;
+    this.channelIconBase = opts.channelIconBase ?? GG_CHANNEL_ICON_BASE;
   }
 
   /** A channel name has to become the numeric id the chat server joins by. */
@@ -224,7 +258,7 @@ export class GoodGameSource extends BaseSource {
       user: String(d.user_name ?? ''),
       userLogin: String(d.user_name ?? '').toLowerCase(),
       color: ggColor(d.color, String(d.user_name ?? '')),
-      badges: ggBadges(d, this.iconBase),
+      badges: ggBadges(d, this.iconBase, this.channelIconBase),
       parts: this.buildParts(String(d.text ?? '')),
       kind: 'chat',
       ts: d.timestamp ? Number(d.timestamp) * 1000 : this.now(),

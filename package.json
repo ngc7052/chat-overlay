@@ -15,7 +15,7 @@
     "changeset": "changeset",
     "version": "changeset version",
     "e2e": "node test/e2e/run.mjs",
-    "e2e:media": "node test/e2e/run.mjs --media"
+    "e2e:media": "node test/e2e/run.mjs --media --only=twitch && node test/e2e/run.mjs --media --only=goodgame"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.0",

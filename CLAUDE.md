@@ -84,6 +84,65 @@ e2e build widens it to loopback, and **only** that build:
 asserts the source policy stays strict, so the exception cannot leak into a
 release. Do not relax the shipped policy to make a test pass.
 
+## Changelog and releasing
+
+Every change that a user would notice gets a changeset:
+
+```bash
+npx changeset        # pick patch / minor / major, describe it in a sentence or two
+```
+
+That writes a small file under `.changeset/`. Several can pile up across PRs.
+When it is time to ship:
+
+```bash
+npm run version      # consumes them: bumps package.json, prepends CHANGELOG.md
+```
+
+Open a PR with that result and merge it — **the version bump is what triggers
+the release**, and the release notes are read straight from the new CHANGELOG
+section.
+
+Rules that keep the changelog honest:
+
+- **Write the changeset in the PR that makes the change**, not later. Writing
+  them afterwards is how one ends up describing work that already shipped —
+  which happened here once and had to be removed before it claimed the same
+  feature under two versions.
+- **Describe what changed for a user**, not which files moved.
+- If the entry stops being true while the PR is in review, edit the changeset.
+- `1.0.0` and `1.0.1` predate changesets, so their entries are hand-written.
+  `changeset version` prepends above them and leaves them alone.
+
+## How it talks to the platforms
+
+Read-only and anonymous on both; the app never sees a password.
+
+| | Endpoint |
+|---|---|
+| GoodGame chat | `wss://chat.goodgame.ru/chat2/` — JSON, joins by numeric id (**trailing slash required**) |
+| GoodGame channel id | `goodgame.ru/api/getchannelstatus` |
+| GoodGame smiles | `goodgame.ru/api/4/smiles` |
+| GoodGame icons | `static.goodgame.ru/images/chat-svg-icons/` — white SVGs, no API, mapping read from their CSS |
+| Twitch chat | `wss://irc-ws.chat.twitch.tv:443` — IRC with tags, anonymous `justinfan` nick |
+| Twitch emotes | inline `emotes` tag, plus 7TV / BetterTTV / FrankerFaceZ |
+| Twitch badges | IVR public mirror; artwork itself is on Twitch's own CDN |
+
+HTTP goes through the main process against a host allowlist, so the renderer
+never needs relaxed web security. The renderer has no Node integration.
+
+## How updating works
+
+`boot` picks whichever payload is newest: the one that shipped in the zip
+(`resources/app/payload`) or a downloaded one (`%APPDATA%/ChatOverlay/payload`).
+The updater writes into `payload-new` and `boot` installs it on the next launch,
+so nothing overwrites a file the running process holds open.
+
+A release needs **both** assets: `ChatOverlay.zip` for new users and
+`app-payload.json.gz` for existing installs. A release without the payload asset
+means "the runtime changed, download the full zip", and the app opens the
+release page instead of trying a partial update.
+
 ## Workflows
 
 | Workflow | When | What |

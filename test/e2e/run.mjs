@@ -19,6 +19,9 @@ import { startFakeChat } from './fake-chat-server.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const wantMedia = process.argv.includes('--media');
+// --only=twitch / --only=goodgame captures one chat at a time, so a demo shows
+// what a single platform looks like rather than two interleaved.
+const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || null;
 
 // Build the e2e variant first, so the run always matches the current sources.
 await new Promise((resolve, reject) => {
@@ -30,16 +33,18 @@ await new Promise((resolve, reject) => {
   build.on('exit', (c) => (c === 0 ? resolve() : reject(new Error('build failed'))));
 });
 
-const server = await startFakeChat({ loop: wantMedia });
+const server = await startFakeChat({ loop: wantMedia, only });
 const dataDir = path.join(root, 'dist', 'e2e-profile');
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
 
+const allSources = [
+  { platform: 'twitch', channel: 'halcyon_tv', enabled: true },
+  { platform: 'goodgame', channel: 'vetroduy', enabled: true },
+];
+
 writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
-  sources: [
-    { platform: 'twitch', channel: 'aurelia_tv', enabled: true },
-    { platform: 'goodgame', channel: 'fakestream', enabled: true },
-  ],
+  sources: only ? allSources.filter((s) => s.platform === only) : allSources,
   locked: false,
   bounds: { x: 60, y: 60, width: 560, height: 520 },
   bgOpacity: 0,
@@ -59,6 +64,8 @@ const child = spawn(process.execPath, [electron, '--no-sandbox', driver], {
     ...server.env,
     OVERLAY_E2E_PROFILE: dataDir,
     OVERLAY_E2E_MEDIA: wantMedia ? path.join(root, 'docs', 'media') : '',
+    OVERLAY_E2E_PREFIX: only ? only + '-' : '',
+    OVERLAY_E2E_ONLY: only ?? '',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],

@@ -60,6 +60,13 @@ function iconPng([r, g, b], shape) {
       else if (shape === 'rounded') {
         const ox = Math.max(Math.abs(dx) - 5, 0), oy = Math.max(Math.abs(dy) - 5, 0);
         inside = Math.hypot(ox, oy) <= 5.5;
+      } else if (shape === 'face') {
+        // A round face with eyes and a mouth, so demo emotes read as emotes
+        // rather than as coloured dots.
+        const inCircle = dx * dx + dy * dy <= 110;
+        const eye = (ex) => (dx - ex) ** 2 + (dy + 2.5) ** 2 <= 3.2;
+        const mouth = dy > 2 && dy < 5 && Math.abs(dx) < 5 && dx * dx + (dy - 1) * (dy - 1) > 9;
+        inside = inCircle && !eye(-3.4) && !eye(3.4) && !mouth;
       } else if (shape === 'star') {
         const ang = Math.atan2(dy, dx);
         const rad = 6.5 + 4 * Math.cos(5 * ang);
@@ -109,36 +116,96 @@ const IMAGES = {
   'vip.png': [[224, 90, 168], 'diamond'],
   'host.png': [[230, 57, 70], 'circle'],
   'sub.png': [[111, 140, 255], 'star'],
-  'catjam.png': [[250, 204, 21], 'circle'],
-  'pogu.png': [[96, 165, 250], 'star'],
-  'peka.png': [[244, 114, 182], 'circle'],
-  'sing.png': [[125, 211, 252], 'diamond'],
+  'catjam.png': [[250, 204, 21], 'face'],
+  'pogu.png': [[147, 197, 253], 'face'],
+  'peka.png': [[250, 204, 21], 'face'],
+  'sing.png': [[250, 204, 21], 'face'],
 };
 
-/** The transcript both protocols replay. One place to change what a demo shows. */
-export const SCRIPT = [
-  { at: 300, platform: 'twitch', user: 'Aurelia_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'right, one more run and then we call it' },
-  { at: 1200, platform: 'goodgame', user: 'marked0ne', color: 'streamer', rights: 20, icon: 'eagle', text: 'дави на газ!' },
-  { at: 2100, platform: 'twitch', user: 'nine_volt', color: '#1E90FF', badges: 'subscriber/12', text: 'catJAM catJAM' },
-  { at: 3000, platform: 'twitch', user: 'ModBot', color: '#2FA84F', badges: 'moderator/1', text: 'nine_volt has been here for 14 months' },
-  { at: 3900, platform: 'goodgame', user: 'qwheeinnaevol', color: 'simple', rights: 0, icon: 'star', premium: 1, text: 'ну наконец-то :pekaclap:' },
-  { at: 4800, platform: 'twitch', user: 'tessitura', color: '#DA70D6', badges: 'vip/1', text: 'PogU that was clean' },
-  { at: 5700, platform: 'twitch', user: 'holloway', color: '#0000FF', badges: '', text: 'dark blue name, still readable' },
-  { at: 6600, platform: 'goodgame', user: 'Agent_Punto', color: 'premium-personal', rights: 0, premium: 1, ggPlus: 12, text: 'gg wp' },
-  { at: 7500, platform: 'twitch', user: 'nine_volt', color: '#1E90FF', badges: 'subscriber/12', text: 'link check https://example.com/clip' },
-  { at: 8400, platform: 'twitch', user: 'Aurelia_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'thanks for watching everyone' },
+/**
+ * The transcripts the fake server replays.
+ *
+ * Every name here is invented. Earlier drafts used handles observed on real
+ * channels, which is not something to put in a public README.
+ *
+ * Twitch talks English and GoodGame talks Russian, because that is what those
+ * chats actually look like and a demo should not pretend otherwise.
+ */
+export const TWITCH_SCRIPT = [
+  { at: 200, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'one more run and then we call it' },
+  { at: 900, user: 'pixel_wraith', color: '#1E90FF', badges: 'subscriber/12', text: 'catJAM catJAM' },
+  { at: 1600, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'that jump was frame perfect' },
+  { at: 2300, user: 'LedgerBot', color: '#5F9EA0', badges: 'moderator/1', text: 'pixel_wraith has been here 14 months' },
+  { at: 3000, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'PogU no way' },
+  { at: 3700, user: 'BitCrusher88', color: '#0000FF', badges: '', text: 'dark blue name, still readable' },
+  { at: 4400, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'chat is flying today' },
+  { at: 5100, user: 'dust_devil', color: '#8A2BE2', badges: '', text: 'clip that' },
+  { at: 5800, user: 'pixel_wraith', color: '#1E90FF', badges: 'subscriber/12', text: 'https://example.com/clip' },
+  { at: 6500, user: 'NovaKestrel', color: '#20B2AA', badges: '', text: 'first time catching this live' },
+  { at: 7200, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'PogU' },
+  { at: 7900, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'how many attempts was that' },
+  { at: 8600, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'forty one. i counted' },
+  { at: 9300, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'catJAM' },
+  { at: 10000, user: 'dust_devil', color: '#8A2BE2', badges: '', text: 'worth every one of them' },
+  { at: 10700, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'thanks for hanging about, all' },
 ];
+
+export const GOODGAME_SCRIPT = [
+  { at: 400, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'так, ещё один заход и заканчиваем' },
+  { at: 1100, user: 'КотБаюн', color: 'simple', icon: 'star', premium: 1, resub: 2, text: 'ну наконец-то :pekaclap:' },
+  { at: 1800, user: 'Сумрак77', color: 'simple', text: 'вот это реакция конечно :pekaclap:' },
+  { at: 2500, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'я аж подпрыгнула :sing:' },
+  { at: 3200, user: 'ЛунныйЗаяц', color: 'simple', text: 'сколько попыток было?' },
+  { at: 3900, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'сорок одна, я считал' },
+  { at: 4600, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, resub: 5, text: 'терпение и труд :sing:' },
+  { at: 5300, user: 'Сумрак77', color: 'simple', text: 'красиво прошёл, без единой ошибки' },
+  { at: 6000, user: 'Тихоня', color: 'simple', text: 'первый раз смотрю вживую' },
+  { at: 6700, user: 'КотБаюн', color: 'simple', icon: 'star', premium: 1, resub: 2, text: 'клип обязательно' },
+  { at: 7400, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'https://example.com/клип' },
+  { at: 8100, user: 'ЛунныйЗаяц', color: 'simple', text: 'подписался, спасибо за стрим :sing:' },
+  { at: 8800, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, text: 'до завтра, всем добра!' },
+  { at: 9500, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'всем спасибо, что были рядом' },
+];
+
+/** Both, interleaved — what the assertion run uses. */
+export const SCRIPT = [
+  ...TWITCH_SCRIPT.map((m) => ({ ...m, platform: 'twitch' })),
+  ...GOODGAME_SCRIPT.map((m) => ({ ...m, platform: 'goodgame' })),
+].sort((a, b) => a.at - b.at);
 
 /* ---------------------------------------------------------------- server ---- */
 
-export async function startFakeChat({ port = 0, script = SCRIPT, loop = false } = {}) {
+export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, only = null } = {}) {
+  if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
   const http = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
+    if (url.pathname.startsWith('/files/icons/')) {
+      // Stand-in for a channel's own subscriber artwork: coloured per tier, the
+      // way real GoodGame channels ship one image per tier.
+      const tier = Number((/-(\d+)-48\.png$/.exec(url.pathname) || [])[1]) || 1;
+      const palette = [[255, 179, 71], [244, 114, 182], [96, 165, 250], [52, 211, 153],
+                       [251, 113, 133], [167, 139, 250], [250, 204, 21]];
+      const png = iconPng(palette[(tier - 1) % palette.length], 'star');
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length });
+      return res.end(png);
+    }
     if (url.pathname.startsWith('/gg-icons/')) {
-      // Fill-less, exactly like GoodGame's: the renderer must mask it, not <img> it.
+      // Fill-less white glyphs, exactly like GoodGame's, and distinct per name
+      // so a demo does not show the same shape three times.
+      const name = url.pathname.slice('/gg-icons/'.length);
+      const paths = {
+        star: 'M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z',
+        cup: 'M7 3h10v3h3a3 3 0 0 1-3 3h-.4A5 5 0 0 1 13 12.9V16h3v3H8v-3h3v-3.1A5 5 0 0 1 7.4 9H7a3 3 0 0 1-3-3h3V3z',
+        eagle: 'M12 3l4 4 5-1-3 4 3 3-5 1-2 7-2-4-2 4-2-7-5-1 3-3-3-4 5 1z',
+        plus: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm1 4h-2v4H7v2h4v4h2v-4h4v-2h-4z',
+      };
+      const key = name.startsWith('gg-') ? 'plus'
+        : name.startsWith('Cup') ? 'cup'
+        : name.startsWith('Eagle') ? 'eagle'
+        : 'star';
       const svg = '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
-        '<path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>';
+        `<path fill="white" d="${paths[key]}"/></svg>`;
       res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
       return res.end(svg);
     }
@@ -245,6 +312,7 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false } 
             user_rights: m.rights ?? 0,
             premium: m.premium ?? 0,
             icon: m.icon ?? 'none',
+            resubs: m.resub ? { [GG_CHANNEL_ID]: m.resub } : {},
             gg_plus_tier: m.ggPlus ?? 0,
             color: m.color,
             message_id: 'gg-' + Math.random().toString(36).slice(2, 10),
@@ -263,6 +331,7 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false } 
       OVERLAY_GOODGAME_WS: `ws://127.0.0.1:${actualPort}/chat2/`,
       OVERLAY_TEST_API_BASE: `http://127.0.0.1:${actualPort}`,
       OVERLAY_GG_ICON_BASE: `http://127.0.0.1:${actualPort}/gg-icons/`,
+      OVERLAY_GG_CHANNEL_ICON_BASE: `http://127.0.0.1:${actualPort}/files/icons/`,
     },
     async close() {
       for (const t of timers) clearTimeout(t);

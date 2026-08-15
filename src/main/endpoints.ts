@@ -11,6 +11,7 @@ export interface Endpoints {
   twitchWs: string | null;
   goodgameWs: string | null;
   ggIconBase: string | null;
+  ggChannelIconBase: string | null;
 }
 
 export interface EndpointEnv {
@@ -18,6 +19,7 @@ export interface EndpointEnv {
   OVERLAY_GOODGAME_WS?: string | undefined;
   OVERLAY_TEST_API_BASE?: string | undefined;
   OVERLAY_GG_ICON_BASE?: string | undefined;
+  OVERLAY_GG_CHANNEL_ICON_BASE?: string | undefined;
 }
 
 export function resolveEndpoints(env: EndpointEnv): Endpoints {
@@ -25,6 +27,7 @@ export function resolveEndpoints(env: EndpointEnv): Endpoints {
     twitchWs: env.OVERLAY_TWITCH_WS ?? null,
     goodgameWs: env.OVERLAY_GOODGAME_WS ?? null,
     ggIconBase: env.OVERLAY_GG_ICON_BASE ?? null,
+    ggChannelIconBase: env.OVERLAY_GG_CHANNEL_ICON_BASE ?? null,
   };
 }
 

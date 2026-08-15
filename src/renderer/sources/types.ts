@@ -68,6 +68,7 @@ export interface SourceOptions {
   wsUrl?: string | null;
   /** Overrides where GoodGame's icon SVGs are fetched from; e2e only. */
   iconBase?: string | null;
+  channelIconBase?: string | null;
   onMessage(msg: ChatMessage): void;
   onRemove?(req: RemoveRequest): void;
   onStatus?(source: { key: string; platform: PlatformName; channel: string }, state: ConnectionState, detail: string): void;

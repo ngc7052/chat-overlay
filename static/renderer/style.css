@@ -61,7 +61,7 @@ body { display: flex; flex-direction: column; }
 }
 
 #grip {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -81,11 +81,13 @@ body { display: flex; flex-direction: column; }
   fill: currentColor;
   color: var(--ui-dim);
   opacity: 0;
-  transition: opacity .15s ease;
+  /* Background, not padding or size — see the note on .src-name: anything that
+     changes the bar's layout on hover sets off a flicker loop. */
+  border-radius: 4px;
+  transition: opacity .15s ease, background-color .15s ease;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
 }
-body:not(.locked):hover #drag-handle { opacity: .85; }
-body:not(.locked):hover #grip { background: rgba(255, 255, 255, .07); }
+body:not(.locked):hover #drag-handle { opacity: .85; background: rgba(255, 255, 255, .1); }
 
 #status {
   flex: 1 1 auto;
@@ -100,12 +102,10 @@ body:not(.locked):hover #grip { background: rgba(255, 255, 255, .07); }
   color: var(--ui-dim);
 }
 
-/* One dot per channel: colour carries the state, the name is revealed on
-   hover. The names duplicate the "connected — …" lines already in the chat,
-   so they do not earn permanent space in the bar. */
-/* Deliberately NOT no-drag. Making the dots clickable stole drag surface from
-   the bar, and because the names expand on hover it stole it exactly as the
-   pointer arrived to grab the window. Reconnect has its own button. */
+/* One dot per channel; its colour carries the state, its name fades in on
+   hover. Deliberately NOT no-drag: making the dots clickable stole drag
+   surface from the bar, right where the pointer arrives to grab the window.
+   Reconnect has its own button. */
 .src-dot {
   flex: 0 0 auto;
   display: flex;
@@ -124,20 +124,23 @@ body:not(.locked):hover #grip { background: rgba(255, 255, 255, .07); }
 .src-dot.error::before { background: #f85149; }
 .src-dot.connecting::before { background: #d29922; }
 
+/*
+ * Revealed by hovering the window — the same signal that fades the backdrop in.
+ * Hovering the bar itself is not usable: most of it is an app-region drag
+ * surface, which never delivers hover to the page.
+ *
+ * Fading only. Nothing here may change layout on hover: the bar is a drag
+ * region, so a size change makes Chromium recompute it, which disturbs the
+ * pointer state, which drops the hover, which changes the size back. That
+ * oscillates several times a second and makes the bar unusable. The names
+ * therefore always occupy their space and only their opacity moves.
+ */
 .src-name {
-  /* max-width does nothing to a plain inline box, which leaves the name
-     permanently expanded. */
-  display: inline-block;
-  max-width: 0;
-  overflow: hidden;
   opacity: 0;
-  transition: max-width .15s ease, opacity .15s ease;
+  transition: opacity .15s ease;
   text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
 }
-/* Revealed by hovering the window, the same signal that fades the backdrop in.
-   Hovering the bar itself is not usable: most of it is an app-region drag
-   surface, which never delivers hover to the page. */
-body:not(.locked):hover .src-name { max-width: 22ch; opacity: 1; }
+body:not(.locked):hover .src-name { opacity: 1; }
 
 #bar button {
   -webkit-app-region: no-drag;

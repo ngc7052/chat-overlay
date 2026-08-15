@@ -178,16 +178,27 @@ app.whenReady().then(async () => {
 
   // Backdrop: transparent unless unlocked and hovered.
   const BG = `getComputedStyle(document.getElementById('chat')).backgroundColor`;
-  const NAME_W = `document.querySelector('#status .src-name').getBoundingClientRect().width`;
+  const NAME_OPACITY = `getComputedStyle(document.querySelector('#status .src-name')).opacity`;
+  const BAR_LAYOUT = `JSON.stringify(['bar', 'grip', 'status'].map((id) => {
+    const r = document.getElementById(id).getBoundingClientRect();
+    return [Math.round(r.width), Math.round(r.height)];
+  }))`;
   placeWindow('away');
   check('unlocked, not hovered: no backdrop', await until(`${BG} === 'rgba(10, 12, 18, 0)'`),
     await q(BG));
-  check('not hovered: channel names stay collapsed', await until(`${NAME_W} === 0`));
+  check('not hovered: channel names are invisible', await until(`${NAME_OPACITY} === '0'`));
+  const layoutCold = await q(BAR_LAYOUT);
   placeWindow('under');
   check('unlocked, hovered: backdrop visible', await until(`${BG} === 'rgba(10, 12, 18, 0.55)'`),
     await q(BG));
   // The same hover that fades the backdrop in also names each dot's channel.
-  check('hovering reveals the channel names', await until(`${NAME_W} > 0`));
+  check('hovering reveals the channel names', await until(`${NAME_OPACITY} === '1'`));
+  // The bar is a drag region. If hovering resizes anything in it, Chromium
+  // recomputes that region, which disturbs the pointer, which drops the hover,
+  // which resizes it back — a flicker loop several times a second that makes
+  // the bar unusable. Hover may repaint; it may not reflow.
+  check('hovering does not change the bar layout', (await q(BAR_LAYOUT)) === layoutCold,
+    `cold=${layoutCold} hot=${await q(BAR_LAYOUT)}`);
   check('hovering shows where to grab the window',
     await until(`getComputedStyle(document.getElementById('drag-handle')).opacity > 0.5`));
   await snap('overlay-hover.png');

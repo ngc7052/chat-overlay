@@ -10,7 +10,10 @@ import { resolveEndpoints, rewriteApiUrl } from '../../src/main/endpoints.js';
 describe('resolveEndpoints', () => {
   it('is null for a normal install', () => {
     expect(resolveEndpoints({}))
-      .toEqual({ twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null });
+      .toEqual({
+        twitchWs: null, goodgameWs: null,
+        ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
+      });
   });
 
   it('passes the overrides through when the harness sets them', () => {
@@ -19,17 +22,21 @@ describe('resolveEndpoints', () => {
       OVERLAY_GOODGAME_WS: 'ws://127.0.0.1:1/chat2/',
       OVERLAY_GG_ICON_BASE: 'http://127.0.0.1:1/gg-icons/',
       OVERLAY_GG_CHANNEL_ICON_BASE: 'http://127.0.0.1:1/files/icons/',
+      OVERLAY_TWITCH_EMOTE_BASE: 'http://127.0.0.1:1/emoticons/v2/',
     })).toEqual({
       twitchWs: 'ws://127.0.0.1:1/irc',
       goodgameWs: 'ws://127.0.0.1:1/chat2/',
       ggIconBase: 'http://127.0.0.1:1/gg-icons/',
       ggChannelIconBase: 'http://127.0.0.1:1/files/icons/',
+      twitchEmoteBase: 'http://127.0.0.1:1/emoticons/v2/',
     });
   });
 
   it('treats one override as independent of the other', () => {
-    expect(resolveEndpoints({ OVERLAY_TWITCH_WS: 'ws://x/1' }))
-      .toEqual({ twitchWs: 'ws://x/1', goodgameWs: null, ggIconBase: null, ggChannelIconBase: null });
+    expect(resolveEndpoints({ OVERLAY_TWITCH_WS: 'ws://x/1' })).toEqual({
+      twitchWs: 'ws://x/1', goodgameWs: null,
+      ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
+    });
   });
 });
 

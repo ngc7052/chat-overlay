@@ -11,116 +11,75 @@
  * found a bug.
  */
 import { createServer } from 'node:http';
-import { deflateSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
-const GG_CHANNEL_ID = '4242';
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+
+/**
+ * GoodGame channel 5, whose own subscriber artwork is vendored, so the
+ * per-tier icons a real premium chat shows are exercised too.
+ */
+const GG_CHANNEL_ID = '5';
 
 /* ------------------------------------------------------------- fixtures ---- */
 
-/** Every image is served by this server too, so a run needs no network at all. */
-const fixtures = (origin) => ({
-  badgesGlobal: [
-    { set_id: 'moderator', versions: [{ id: '1', image_url_2x: `${origin}/img/mod.png`, title: 'Moderator' }] },
-    { set_id: 'vip', versions: [{ id: '1', image_url_2x: `${origin}/img/vip.png`, title: 'VIP' }] },
-    { set_id: 'broadcaster', versions: [{ id: '1', image_url_2x: `${origin}/img/host.png`, title: 'Broadcaster' }] },
-  ],
-  badgesChannel: [
-    { set_id: 'subscriber', versions: [{ id: '12', image_url_2x: `${origin}/img/sub.png`, title: 'Subscriber' }] },
-  ],
-  sevenTvGlobal: {
-    emotes: [
-      { id: 'catjam', name: 'catJAM', data: { host: { url: `${origin}/img`, files: [{ name: 'catjam.png' }] } } },
-      { id: 'pogu', name: 'PogU', data: { host: { url: `${origin}/img`, files: [{ name: 'pogu.png' }] } } },
-    ],
-  },
-  ggSmiles: [
-    { key: 'pekaclap', channel_id: 0, animated: 0, images: { small: `${origin}/img/peka.png` } },
-    { key: 'sing', channel_id: 0, animated: 0, images: { small: `${origin}/img/sing.png` } },
-  ],
-});
+/**
+ * The artwork is the platforms' own, vendored under `fixtures/` and served
+ * from disk. A run therefore needs no network and cannot flake, and what it
+ * draws is what a user sees — which matters, because a screenshot of emotes
+ * that are obviously stand-ins tells you nothing about whether the catalogue
+ * matched the right one.
+ */
 
 /**
- * A 24x24 PNG drawn from a shape, so demo badges and emotes read as icons
- * rather than flat blocks. Generated here so the repo carries no binary
- * fixtures and a run is byte-for-byte reproducible.
- *
- * These are deliberately generic glyphs, not imitations of anyone's artwork.
+ * Twitch's own emotes, by the ids their CDN actually serves. Sent down the
+ * `emotes` tag as character ranges, which is how Twitch delivers them, so the
+ * range parser is exercised rather than bypassed.
  */
-function iconPng([r, g, b], shape) {
-  const size = 24, mid = (size - 1) / 2;
-  const px = [];
-  for (let y = 0; y < size; y++) {
-    const row = [0];
-    for (let x = 0; x < size; x++) {
-      const dx = x - mid, dy = y - mid;
-      let inside = false;
-      if (shape === 'circle') inside = dx * dx + dy * dy <= 100;
-      else if (shape === 'diamond') inside = Math.abs(dx) + Math.abs(dy) <= 10.5;
-      else if (shape === 'rounded') {
-        const ox = Math.max(Math.abs(dx) - 5, 0), oy = Math.max(Math.abs(dy) - 5, 0);
-        inside = Math.hypot(ox, oy) <= 5.5;
-      } else if (shape === 'face') {
-        // A round face with eyes and a mouth, so demo emotes read as emotes
-        // rather than as coloured dots.
-        const inCircle = dx * dx + dy * dy <= 110;
-        const eye = (ex) => (dx - ex) ** 2 + (dy + 2.5) ** 2 <= 3.2;
-        const mouth = dy > 2 && dy < 5 && Math.abs(dx) < 5 && dx * dx + (dy - 1) * (dy - 1) > 9;
-        inside = inCircle && !eye(-3.4) && !eye(3.4) && !mouth;
-      } else if (shape === 'star') {
-        const ang = Math.atan2(dy, dx);
-        const rad = 6.5 + 4 * Math.cos(5 * ang);
-        inside = Math.hypot(dx, dy) <= rad;
-      }
-      // A lighter core gives the glyph some shape instead of a solid blob.
-      const core = Math.hypot(dx, dy) <= 3.2;
-      if (!inside) row.push(0, 0, 0, 0);
-      else if (core) row.push(Math.min(255, r + 70), Math.min(255, g + 70), Math.min(255, b + 70), 255);
-      else row.push(r, g, b, 255);
-    }
-    px.push(Buffer.from(row));
-  }
-  const raw = Buffer.concat(px);
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const crcBuf = Buffer.alloc(4); crcBuf.writeUInt32BE(crc32(body) >>> 0);
-    return Buffer.concat([len, body, crcBuf]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0); ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; ihdr[9] = 6;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-let CRC_TABLE = null;
-function crc32(buf) {
-  if (!CRC_TABLE) {
-    CRC_TABLE = new Int32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-      CRC_TABLE[n] = c;
-    }
-  }
-  let c = 0xffffffff;
-  for (const byte of buf) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return c ^ 0xffffffff;
-}
-
-const IMAGES = {
-  'mod.png': [[47, 168, 79], 'rounded'],
-  'vip.png': [[224, 90, 168], 'diamond'],
-  'host.png': [[230, 57, 70], 'circle'],
-  'sub.png': [[111, 140, 255], 'star'],
-  'catjam.png': [[250, 204, 21], 'face'],
-  'pogu.png': [[147, 197, 253], 'face'],
-  'peka.png': [[250, 204, 21], 'face'],
-  'sing.png': [[250, 204, 21], 'face'],
+const TWITCH_NATIVE = {
+  Kappa: '25', PogChamp: '305954156', LUL: '425618', Kreygasm: '41',
+  '4Head': '354', TriHard: '120232', HeyGuys: '30259', SeemsGood: '64138',
+  NotLikeThis: '58765', Jebaited: '90076',
 };
+
+/** Third-party emotes, by their real 7TV ids. */
+const SEVEN_TV = {
+  Clap: '01GAM8EFQ00004MXFXAJYKA859', peepoHappy: '01GAZ199Z8000FEWHS6AT5QZV0',
+  PepePls: '01GAFTZ9K80003DHH026MC7JW0', FeelsDankMan: '01GB9W8JN80004CKF2H1TWA99H',
+  EZ: '01GB4CK01800090V9B3D8CGEEX', WAYTOODANK: '01G98W833R0000BRQD106P0ZNT',
+  Stare: '01GG3YGWK8000DWE419062SG28', AYAYA: '01GB32XE6R00018VJGJ4A9BNCV',
+  peepoSad: '01GAZ4SBX80007YCE2RXBT44B2', forsenPls: '01GB8EQNJ8000497KFBZWNSDFZ',
+  BillyApprove: '01GB2S7H7000018VJGJ4A9BMFS', FeelsOkayMan: '01GB46137R000BJ5HR8F6XV8J1',
+};
+
+/** GoodGame's global smiles, all of which exist under /images/smiles/. */
+const GG_SMILES = [
+  'pekaclap', 'peka', 'kekw', 'wow', 'cool', 'winner', 'fire', 'hug',
+  'sing', 'love', 'metal', 'marvelous', 'flowers', 'goodboy', 'gosling', 'waiting',
+];
+
+const fixtures = (origin) => ({
+  badgesGlobal: [
+    { set_id: 'moderator', versions: [{ id: '1', image_url_2x: `${origin}/twitch-badges/moderator.png`, title: 'Moderator' }] },
+    { set_id: 'vip', versions: [{ id: '1', image_url_2x: `${origin}/twitch-badges/vip.png`, title: 'VIP' }] },
+    { set_id: 'broadcaster', versions: [{ id: '1', image_url_2x: `${origin}/twitch-badges/broadcaster.png`, title: 'Broadcaster' }] },
+  ],
+  badgesChannel: [
+    { set_id: 'subscriber', versions: [{ id: '12', image_url_2x: `${origin}/twitch-badges/subscriber.png`, title: 'Subscriber' }] },
+  ],
+  sevenTvGlobal: {
+    emotes: Object.entries(SEVEN_TV).map(([name, id]) => ({
+      id, name, data: { host: { url: `${origin}/7tv/${id}`, files: [{ name: '2x.webp' }] } },
+    })),
+  },
+  ggSmiles: GG_SMILES.map((key) => ({
+    key, channel_id: 0, animated: 0, images: { small: `${origin}/gg-smiles/${key}.png` },
+  })),
+});
+
 
 /**
  * The transcripts the fake server replays.
@@ -132,40 +91,61 @@ const IMAGES = {
  * chats actually look like and a demo should not pretend otherwise.
  */
 export const TWITCH_SCRIPT = [
-  { at: 200, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'one more run and then we call it' },
-  { at: 900, user: 'pixel_wraith', color: '#1E90FF', badges: 'subscriber/12', text: 'catJAM catJAM' },
-  { at: 1600, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'that jump was frame perfect' },
+  { at: 200, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'one more run and then we call it HeyGuys' },
+  { at: 900, user: 'pixel_wraith', color: '#1E90FF', badges: 'subscriber/12', text: 'Clap Clap PogChamp' },
+  { at: 1600, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'that jump was frame perfect Kappa' },
   { at: 2300, user: 'LedgerBot', color: '#5F9EA0', badges: 'moderator/1', text: 'pixel_wraith has been here 14 months' },
-  { at: 3000, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'PogU no way' },
+  { at: 3000, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'peepoHappy no way' },
   { at: 3700, user: 'BitCrusher88', color: '#0000FF', badges: '', text: 'dark blue name, still readable' },
-  { at: 4400, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'chat is flying today' },
-  { at: 5100, user: 'dust_devil', color: '#8A2BE2', badges: '', text: 'clip that' },
+  { at: 4400, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'LUL LUL chat is flying today' },
+  { at: 5100, user: 'dust_devil', color: '#8A2BE2', badges: '', text: 'clip that WAYTOODANK' },
   { at: 5800, user: 'pixel_wraith', color: '#1E90FF', badges: 'subscriber/12', text: 'https://example.com/clip' },
-  { at: 6500, user: 'NovaKestrel', color: '#20B2AA', badges: '', text: 'first time catching this live' },
-  { at: 7200, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'PogU' },
-  { at: 7900, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'how many attempts was that' },
-  { at: 8600, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'forty one. i counted' },
-  { at: 9300, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'catJAM' },
-  { at: 10000, user: 'dust_devil', color: '#8A2BE2', badges: '', text: 'worth every one of them' },
-  { at: 10700, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'thanks for hanging about, all' },
+  { at: 6500, user: 'NovaKestrel', color: '#20B2AA', badges: '', text: 'first time catching this live Kreygasm' },
+  { at: 7200, user: 'quietstorm', color: '#DA70D6', badges: 'vip/1', text: 'PepePls PepePls' },
+  { at: 7900, user: 'mossy_toad', color: '#2FA84F', badges: '', text: 'how many attempts was that Stare' },
+  { at: 8600, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'forty one. i counted 4Head' },
+  { at: 9300, user: 'orbital_cat', color: '#E6A400', badges: 'subscriber/12', text: 'FeelsDankMan EZ' },
+  { at: 10000, user: 'NovaKestrel', color: '#20B2AA', badges: '', text: 'TriHard worth every one of them' },
+  { at: 10700, user: 'Halcyon_TV', color: '#FF7F50', badges: 'broadcaster/1', text: 'thanks for hanging about, all BillyApprove' },
 ];
 
 export const GOODGAME_SCRIPT = [
   { at: 400, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'так, ещё один заход и заканчиваем' },
   { at: 1100, user: 'КотБаюн', color: 'simple', icon: 'star', premium: 1, resub: 2, text: 'ну наконец-то :pekaclap:' },
-  { at: 1800, user: 'Сумрак77', color: 'simple', text: 'вот это реакция конечно :pekaclap:' },
-  { at: 2500, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'я аж подпрыгнула :sing:' },
-  { at: 3200, user: 'ЛунныйЗаяц', color: 'simple', text: 'сколько попыток было?' },
-  { at: 3900, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'сорок одна, я считал' },
-  { at: 4600, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, resub: 5, text: 'терпение и труд :sing:' },
-  { at: 5300, user: 'Сумрак77', color: 'simple', text: 'красиво прошёл, без единой ошибки' },
-  { at: 6000, user: 'Тихоня', color: 'simple', text: 'первый раз смотрю вживую' },
-  { at: 6700, user: 'КотБаюн', color: 'simple', icon: 'star', premium: 1, resub: 2, text: 'клип обязательно' },
+  { at: 1800, user: 'Сумрак77', color: 'simple', text: 'вот это реакция конечно :kekw:' },
+  { at: 2500, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'я аж подпрыгнула :wow:' },
+  { at: 3200, user: 'ЛунныйЗаяц', color: 'simple', text: 'сколько попыток было? :peka:' },
+  { at: 3900, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'сорок одна, я считал :cool:' },
+  { at: 4600, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, resub: 5, text: 'терпение и труд :winner:' },
+  { at: 5300, user: 'Сумрак77', color: 'simple', text: 'без единой ошибки прошёл :fire: :metal:' },
+  { at: 6000, user: 'Тихоня', color: 'simple', text: 'первый раз смотрю вживую :hug:' },
+  { at: 6700, user: 'КотБаюн', color: 'simple', icon: 'star', premium: 1, resub: 2, text: 'клип обязательно :sing:' },
   { at: 7400, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'https://example.com/клип' },
-  { at: 8100, user: 'ЛунныйЗаяц', color: 'simple', text: 'подписался, спасибо за стрим :sing:' },
-  { at: 8800, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, text: 'до завтра, всем добра!' },
-  { at: 9500, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'всем спасибо, что были рядом' },
+  { at: 8100, user: 'ЛунныйЗаяц', color: 'simple', text: 'подписался, спасибо за стрим :love:' },
+  { at: 8800, user: 'Сумрак77', color: 'simple', text: 'ну это сильно :marvelous:' },
+  { at: 9500, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, text: 'до завтра, всем добра! :flowers:' },
+  { at: 10200, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'всем спасибо, что были рядом :goodboy:' },
 ];
+
+/**
+ * Build the `emotes` tag Twitch would send for a line: `id:start-end,start-end`,
+ * joined by `/`. Ranges are **code-point** indexed, which is why the offsets are
+ * counted over `Array.from` rather than over the string's UTF-16 units.
+ */
+function twitchEmotesTag(text) {
+  const found = new Map();
+  let at = 0;
+  for (const token of text.split(/(\s+)/)) {
+    const len = Array.from(token).length;
+    const id = TWITCH_NATIVE[token];
+    if (id) {
+      const range = `${at}-${at + len - 1}`;
+      found.set(id, found.has(id) ? `${found.get(id)},${range}` : range);
+    }
+    at += len;
+  }
+  return Array.from(found, ([id, ranges]) => `${id}:${ranges}`).join('/');
+}
 
 /** Both, interleaved — what the assertion run uses. */
 export const SCRIPT = [
@@ -175,52 +155,62 @@ export const SCRIPT = [
 
 /* ---------------------------------------------------------------- server ---- */
 
+/**
+ * Map a request path onto a vendored file. Everything the app asks for while
+ * rendering the transcript is here; anything else 404s, which surfaces as a
+ * broken image and fails the run rather than passing quietly.
+ */
+function fixtureFor(pathname) {
+  const seg = pathname.split('/').filter(Boolean);
+  // Twitch's own CDN: /emoticons/v2/<id>/default/dark/2.0
+  if (seg[0] === 'emoticons' && seg[2]) return `twitch-emotes/${seg[2]}.png`;
+  // 7TV: /7tv/<id>/2x.webp
+  if (seg[0] === '7tv' && seg[1]) return `7tv/${seg[1]}.webp`;
+  // GoodGame channel artwork: /files/icons/<channel>-<tier>-48.png
+  if (seg[0] === 'files' && seg[1] === 'icons' && seg[2]) return `gg-channel-icons/${seg[2]}`;
+  if ((seg[0] === 'gg-icons' || seg[0] === 'gg-smiles' || seg[0] === 'twitch-badges') && seg[1]) {
+    return `${seg[0]}/${seg[1]}`;
+  }
+  return null;
+}
+
+const CONTENT_TYPES = {
+  '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif',
+};
+
 export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, only = null } = {}) {
   if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
   const http = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname.startsWith('/files/icons/')) {
-      // Stand-in for a channel's own subscriber artwork: coloured per tier, the
-      // way real GoodGame channels ship one image per tier.
-      const tier = Number((/-(\d+)-48\.png$/.exec(url.pathname) || [])[1]) || 1;
-      const palette = [[255, 179, 71], [244, 114, 182], [96, 165, 250], [52, 211, 153],
-                       [251, 113, 133], [167, 139, 250], [250, 204, 21]];
-      const png = iconPng(palette[(tier - 1) % palette.length], 'star');
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length });
-      return res.end(png);
-    }
-    if (url.pathname.startsWith('/gg-icons/')) {
-      // Fill-less white glyphs, exactly like GoodGame's, and distinct per name
-      // so a demo does not show the same shape three times.
-      const name = url.pathname.slice('/gg-icons/'.length);
-      const paths = {
-        star: 'M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z',
-        cup: 'M7 3h10v3h3a3 3 0 0 1-3 3h-.4A5 5 0 0 1 13 12.9V16h3v3H8v-3h3v-3.1A5 5 0 0 1 7.4 9H7a3 3 0 0 1-3-3h3V3z',
-        eagle: 'M12 3l4 4 5-1-3 4 3 3-5 1-2 7-2-4-2 4-2-7-5-1 3-3-3-4 5 1z',
-        plus: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm1 4h-2v4H7v2h4v4h2v-4h4v-2h-4z',
-      };
-      const key = name.startsWith('gg-') ? 'plus'
-        : name.startsWith('Cup') ? 'cup'
-        : name.startsWith('Eagle') ? 'eagle'
-        : 'star';
-      const svg = '<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
-        `<path fill="white" d="${paths[key]}"/></svg>`;
-      res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
-      return res.end(svg);
-    }
-    if (url.pathname.startsWith('/img/')) {
-      const [rgb, shape] = IMAGES[url.pathname.slice(5)] || [[128, 128, 128], 'circle'];
-      const png = iconPng(rgb, shape);
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length });
-      return res.end(png);
+    const fixture = fixtureFor(url.pathname);
+    if (fixture) {
+      // path.join collapses any '..', and the segments above are single path
+      // components, so a request cannot escape the fixtures directory.
+      const file = path.join(FIXTURES, fixture);
+      let body;
+      try {
+        body = readFileSync(file);
+      } catch {
+        res.writeHead(404).end('missing fixture: ' + fixture);
+        return;
+      }
+      res.writeHead(200, {
+        'Content-Type': CONTENT_TYPES[path.extname(file)] ?? 'application/octet-stream',
+        'Content-Length': body.length,
+      });
+      return res.end(body);
     }
     const send = (body) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(body));
     };
     if (url.pathname === '/api/getchannelstatus') {
-      return send({ [GG_CHANNEL_ID]: { stream_id: Number(GG_CHANNEL_ID), key: url.searchParams.get('id'), status: 'Live' } });
+      return send({
+        [GG_CHANNEL_ID]: {
+          stream_id: Number(GG_CHANNEL_ID), key: url.searchParams.get('id'), status: 'Live',
+        },
+      });
     }
     if (url.pathname === '/api/4/smiles') return send(fx.ggSmiles);
     if (url.pathname === '/v3/emote-sets/global') return send(fx.sevenTvGlobal);
@@ -237,6 +227,7 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
   await new Promise((resolve) => http.listen(port, '127.0.0.1', resolve));
   const actualPort = http.address().port;
   fx = fixtures(`http://127.0.0.1:${actualPort}`);
+  const channelId = GG_CHANNEL_ID;
 
   const wss = new WebSocketServer({ server: http });
   const timers = new Set();
@@ -277,11 +268,12 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
           replay((m) => {
             if (m.platform !== 'twitch') return;
             const id = 'msg-' + Math.random().toString(36).slice(2, 10);
-            // catJAM/PogU are third-party; a native emote is sent by range.
-            const emotes = m.text.includes('Kappa') ? 'emotes=25:0-4;' : 'emotes=;';
+            // Twitch's own emotes arrive as ranges on the tag; third-party ones
+            // are matched by name from the catalogues, as in production.
+            const emotes = twitchEmotesTag(m.text);
             ws.send(
               `@badge-info=;badges=${m.badges};color=${m.color};display-name=${m.user};` +
-              `${emotes}id=${id};mod=0;room-id=71092938;subscriber=0;tmi-sent-ts=${Date.now()};` +
+              `emotes=${emotes};id=${id};mod=0;room-id=71092938;subscriber=0;tmi-sent-ts=${Date.now()};` +
               `user-id=1;user-type= :${m.user.toLowerCase()}!u@u.tmi.twitch.tv PRIVMSG #${channel} :${m.text}\r\n`,
             );
           });
@@ -299,20 +291,20 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
       if (frame.type !== 'join') return;
       ws.send(JSON.stringify({
         type: 'success_join',
-        data: { channel_id: GG_CHANNEL_ID, channel_name: 'Fake stream', channel_key: 'fake' },
+        data: { channel_id: channelId, channel_name: 'Fake stream', channel_key: 'fake' },
       }));
       replay((m) => {
         if (m.platform !== 'goodgame') return;
         ws.send(JSON.stringify({
           type: 'message',
           data: {
-            channel_id: GG_CHANNEL_ID,
+            channel_id: channelId,
             user_id: 1,
             user_name: m.user,
             user_rights: m.rights ?? 0,
             premium: m.premium ?? 0,
             icon: m.icon ?? 'none',
-            resubs: m.resub ? { [GG_CHANNEL_ID]: m.resub } : {},
+            resubs: m.resub ? { [channelId]: m.resub } : {},
             gg_plus_tier: m.ggPlus ?? 0,
             color: m.color,
             message_id: 'gg-' + Math.random().toString(36).slice(2, 10),
@@ -330,8 +322,11 @@ export async function startFakeChat({ port = 0, script = SCRIPT, loop = false, o
       OVERLAY_TWITCH_WS: `ws://127.0.0.1:${actualPort}/irc`,
       OVERLAY_GOODGAME_WS: `ws://127.0.0.1:${actualPort}/chat2/`,
       OVERLAY_TEST_API_BASE: `http://127.0.0.1:${actualPort}`,
+      // Artwork the app builds urls for itself, rather than reading them out
+      // of an API response, needs its base pointing here too.
       OVERLAY_GG_ICON_BASE: `http://127.0.0.1:${actualPort}/gg-icons/`,
       OVERLAY_GG_CHANNEL_ICON_BASE: `http://127.0.0.1:${actualPort}/files/icons/`,
+      OVERLAY_TWITCH_EMOTE_BASE: `http://127.0.0.1:${actualPort}/emoticons/v2/`,
     },
     async close() {
       for (const t of timers) clearTimeout(t);

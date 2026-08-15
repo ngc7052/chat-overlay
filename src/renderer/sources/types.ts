@@ -69,6 +69,8 @@ export interface SourceOptions {
   /** Overrides where GoodGame's icon SVGs are fetched from; e2e only. */
   iconBase?: string | null;
   channelIconBase?: string | null;
+  /** Overrides where Twitch's own emote artwork is fetched from; e2e only. */
+  emoteBase?: string | null;
   onMessage(msg: ChatMessage): void;
   onRemove?(req: RemoveRequest): void;
   onStatus?(source: { key: string; platform: PlatformName; channel: string }, state: ConnectionState, detail: string): void;

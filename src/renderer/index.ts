@@ -19,7 +19,10 @@ interface OverlayApi {
   resizeBy(dx: number, dy: number): Promise<unknown>;
   quit(): Promise<void>;
   httpJson(url: string): Promise<unknown>;
-  endpoints(): Promise<{ twitchWs: string | null; goodgameWs: string | null; ggIconBase: string | null; ggChannelIconBase: string | null }>;
+  endpoints(): Promise<{
+    twitchWs: string | null; goodgameWs: string | null;
+    ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
+  }>;
   updateVersion(): Promise<{ version: string; bundled: string | null; usingStaged: boolean }>;
   updateCheck(): Promise<{ error?: string; newer?: boolean; current?: string; version?: string }>;
   updateApply(): Promise<{ error?: string; manual?: boolean; staged?: boolean; version?: string }>;
@@ -62,8 +65,8 @@ const updateStatus = $('update-status');
 let config: Config;
 let endpoints: {
   twitchWs: string | null; goodgameWs: string | null;
-  ggIconBase: string | null; ggChannelIconBase: string | null;
-} = { twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null };
+  ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
+} = { twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null };
 let sources: BaseSource[] = [];
 const states = new Map<string, SourceStatus>();
 const nodes = new Map<string, { el: HTMLElement; timer: ReturnType<typeof setTimeout> | null }>();
@@ -303,6 +306,7 @@ function rebuildSources(): void {
       wsUrl: cfgSrc.platform === 'twitch' ? endpoints.twitchWs : endpoints.goodgameWs,
       iconBase: endpoints.ggIconBase,
       channelIconBase: endpoints.ggChannelIconBase,
+      emoteBase: endpoints.twitchEmoteBase,
       onMessage: addMessage,
       onRemove: handleRemove,
       onStatus: (src: { key: string }, state: ConnectionState, detail: string) => {

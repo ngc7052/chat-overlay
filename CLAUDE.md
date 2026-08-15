@@ -12,6 +12,7 @@ npm run typecheck          # tsc --noEmit
 npm test                   # unit tests
 npm run coverage           # unit tests + the 100% thresholds
 npm run e2e                # end-to-end against a local fake chat server
+npm run e2e:media          # re-capture the README demos (needs network)
 npm run check              # typecheck + coverage + e2e — run this before pushing
 npm run build              # compile into app/
 ./build.sh --zip           # full portable build + update payload
@@ -73,8 +74,16 @@ attribute claims. Two bugs in this project passed an attribute check while the
 element was plainly visible on screen.
 
 The app is pointed at the fake server with `OVERLAY_TWITCH_WS`,
-`OVERLAY_GOODGAME_WS`, `OVERLAY_TEST_API_BASE` and `OVERLAY_GG_ICON_BASE`. Real
-installs set none of these and behave exactly as before.
+`OVERLAY_GOODGAME_WS`, `OVERLAY_TEST_API_BASE`, `OVERLAY_GG_ICON_BASE`,
+`OVERLAY_GG_CHANNEL_ICON_BASE` and `OVERLAY_TWITCH_EMOTE_BASE`. Real installs
+set none of these and behave exactly as before.
+
+The emote, badge and icon artwork is the platforms' own, vendored under
+`test/e2e/fixtures/` and served from disk, so a run is offline **and** shows
+what a user sees. Stand-in artwork was tried and thrown away: it looks
+plausible while the catalogue matches the wrong emote entirely, which is
+exactly the bug the run exists to catch. Adding an emote to a transcript means
+downloading its artwork too — see that directory's README.
 
 ### The CSP exception
 
@@ -167,8 +176,9 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   that resurrects channels the user deleted.
 - **A release without an `app-payload.json.gz` asset means "download the full
   zip".** That is correct when the Electron runtime itself changed.
-- **GoodGame icons are fill-less SVGs.** They must be drawn as CSS masks; an
-  `<img>` renders a black square.
+- **GoodGame chat icons are plain white SVGs** (`fill="white"`), so they are
+  drawn as `<img>`. An earlier version assumed they were fill-less and drew
+  them as CSS masks, which turned every badge into the same silhouette.
 - Chat is **read-only and anonymous** on both platforms. Do not add anything
   that needs a login.
 

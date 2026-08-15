@@ -65,8 +65,11 @@ app.whenReady().then(async () => {
     tw: document.querySelectorAll('.msg img.plat-img[alt="twitch"]').length,
     gg: document.querySelectorAll('.msg img.plat-img[alt="goodgame"]').length,
     badges: document.querySelectorAll('.msg img.badge-img').length,
-    ggIcons: document.querySelectorAll('.msg img.badge-img[src*="gg-icons"]').length,
+    ggIcons: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/chat-svg-icons/"]').length,
     emotes: document.querySelectorAll('.msg img.emote').length,
+    emoteNames: Array.from(new Set(Array.from(document.querySelectorAll('.msg img.emote')).map(i => i.alt))),
+    emotePairs: Array.from(new Map(Array.from(document.querySelectorAll('.msg img.emote')).map(i => [i.alt, i.currentSrc || i.src])).entries()),
+    nativeEmotes: document.querySelectorAll('.msg img.emote[src*="/emoticons/v2/"]').length,
     brokenImages: Array.from(document.querySelectorAll('.msg img')).filter(i => i.complete && i.naturalWidth === 0).length,
     urls: document.querySelectorAll('.msg .url').length,
     names: Array.from(document.querySelectorAll('.msg .name')).map(n => n.textContent),
@@ -76,8 +79,13 @@ app.whenReady().then(async () => {
   })`));
 
   console.log('\nrendered:', JSON.stringify({
-    msgs: state.msgs, tw: state.tw, gg: state.gg, badges: state.badges, ggIcons: state.ggIcons, emotes: state.emotes,
+    msgs: state.msgs, tw: state.tw, gg: state.gg, badges: state.badges, ggIcons: state.ggIcons,
+    emotes: state.emotes, distinctEmotes: state.emoteNames.length, native: state.nativeEmotes,
   }));
+
+  if (process.env.OVERLAY_E2E_DUMP) {
+    for (const [alt, src] of state.emotePairs) console.log(`  emote ${alt} -> ${src}`);
+  }
 
   if (!ONLY) {
     check('both platforms rendered', state.tw > 0 && state.gg > 0, `tw=${state.tw} gg=${state.gg}`);
@@ -85,6 +93,13 @@ app.whenReady().then(async () => {
     check('twitch badge artwork rendered', state.badges >= 3, `badges=${state.badges}`);
     check('goodgame icons rendered', state.ggIcons >= 3, `ggIcons=${state.ggIcons}`);
     check('emotes rendered', state.emotes >= 2, `emotes=${state.emotes}`);
+    // A demo that shows the same two emotes over and over is not a demo, and a
+    // catalogue lookup that silently matched only one name would still pass a
+    // bare count check.
+    check('a spread of different emotes rendered', state.emoteNames.length >= 12,
+      `distinct=${state.emoteNames.length} (${state.emoteNames.join(', ')})`);
+    check("twitch's own emotes rendered from the emotes tag", state.nativeEmotes >= 5,
+      `native=${state.nativeEmotes}`);
     check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
     check('goodgame nickname present', state.names.includes('КотБаюн'));
     check('twitch nickname present', state.names.includes('pixel_wraith'));

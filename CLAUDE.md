@@ -91,14 +91,26 @@ mtimes; it records the write order now.
 both chat protocols and serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs three scenarios, because the happy path is the one thing a
-real chat rarely stays on:
+`npm run e2e` runs six scenarios in about half a minute, because the happy path
+is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
 |---|---|
 | default | messages, badges, emotes, colours, lock, settings, drag regions |
 | `--scenario=drop` | both sockets terminated mid-transcript with no close frame — the app must notice, back off, reconnect and carry on, with nobody pressing anything |
 | `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
+| `--scenario=staged` | a downloaded payload in `payload-new` — boot must install it, run it, and clear the launch counter once the renderer reports in |
+| `--scenario=trials` | the same payload after three launches that never reported in — quarantined, moved aside, bundled one runs instead |
+| `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
+
+The last three stage a real payload into the profile and let `boot.js` decide,
+in a real Electron process. They are the only tests of the code that picks
+which app you run, and a wrong decision there bricks an install.
+
+The profile lives in the system temp directory, **not** in the repo: node
+resolves module type from the nearest `package.json`, and inside the repo the
+root's `"type": "module"` makes a staged payload fail to load as CommonJS —
+which no real install, sitting under `%APPDATA%`, would ever hit.
 
 Assert on what is *painted* — `getClientRects().length` — not on what an
 attribute claims. Two bugs in this project passed an attribute check while the

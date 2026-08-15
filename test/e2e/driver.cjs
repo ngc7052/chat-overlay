@@ -17,6 +17,14 @@ const ONLY = process.env.OVERLAY_E2E_ONLY || '';
 const SCENARIO = process.env.OVERLAY_E2E_SCENARIO || '';
 app.setPath('userData', PROFILE);
 
+// boot relaunches with this flag after quarantining a payload that threw. That
+// second process exists only to prove the app comes back; the assertions about
+// what was quarantined are made from run.mjs, against the files left behind.
+if (process.argv.includes('--overlay-recovered')) {
+  console.log('  (recovery launch)');
+  app.exit(0);
+}
+
 require(path.join(__dirname, '..', '..', 'app', 'boot.js'));
 
 const failures = [];
@@ -163,6 +171,60 @@ async function scenarioDrop() {
     `before=${before} after=${await q(MSGS)}`);
 }
 
+const stateFile = () => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(PROFILE, 'payload-state.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * A payload downloaded by the updater has to actually be the one that runs,
+ * and boot has to notice it worked. Nothing else in the suite runs boot's
+ * decisions in a real process — and they decide which app you get.
+ */
+async function scenarioStaged() {
+  const info = await q(`window.overlay.updateVersion()`);
+  check('the downloaded payload is the one running', info.usingStaged === true, JSON.stringify(info));
+  check('and it is the version that was staged', info.version === '99.0.0', JSON.stringify(info));
+  check('the bundled version is still there underneath',
+    !!info.bundled && info.bundled !== '99.0.0', JSON.stringify(info));
+
+  check('the staged directory was installed, and the incoming one consumed',
+    fs.existsSync(path.join(PROFILE, 'payload')) && !fs.existsSync(path.join(PROFILE, 'payload-new')));
+
+  // markHealthy() runs when the renderer reports in; until then every launch
+  // counts against the payload.
+  check('the launch counter is cleared once the renderer comes up',
+    await until(`true`, 1) && (() => {
+      const s = stateFile();
+      return s && s.version === '99.0.0' && s.trials === 0;
+    })(), JSON.stringify(stateFile()));
+
+  check('and the app works: messages are rendering', await until(`${MSGS} > 0`, 20000));
+}
+
+/**
+ * The same payload after three launches that never reported in. Whatever is
+ * wrong with it, boot must stop choosing it and fall back — this is what keeps
+ * a bad release from bricking an install.
+ */
+async function scenarioTrials() {
+  const info = await q(`window.overlay.updateVersion()`);
+  check('the failing payload is not running', info.usingStaged === false, JSON.stringify(info));
+  check('the bundled version is', info.version === info.bundled, JSON.stringify(info));
+
+  const state = stateFile();
+  check('it is recorded as quarantined', state?.quarantined?.version === '99.0.0', JSON.stringify(state));
+  check('with the reason kept', /failed to start/.test(state?.quarantined?.reason ?? ''),
+    JSON.stringify(state?.quarantined));
+  check('the directory is moved aside, not left installed',
+    !fs.existsSync(path.join(PROFILE, 'payload')) && fs.existsSync(path.join(PROFILE, 'payload-broken')));
+  check('and the app is perfectly usable on the bundled payload',
+    await until(`${MSGS} > 0`, 20000));
+}
+
 /**
  * Every emote/badge/icon provider unreachable. They are an enhancement; losing
  * them must not cost a single message.
@@ -196,12 +258,20 @@ async function scenarioDegraded() {
   check('the message text itself is intact', state.text.length > 0, JSON.stringify(state.text));
 }
 
+const HARD_TIMEOUT_MS = 180000;
+setTimeout(() => {
+  console.log(`\nE2E FAIL: the driver ran past ${HARD_TIMEOUT_MS / 1000}s`);
+  app.exit(1);
+}, HARD_TIMEOUT_MS).unref();
+
 app.whenReady().then(async () => {
   await wait(1500);
   if (!win) { console.log('E2E FAIL: no window'); app.exit(1); return; }
 
   if (SCENARIO) {
     if (SCENARIO === 'drop') await scenarioDrop();
+    else if (SCENARIO === 'staged') await scenarioStaged();
+    else if (SCENARIO === 'trials') await scenarioTrials();
     else await scenarioDegraded();
     check('no console errors', consoleErrors.length === 0, consoleErrors.join(' | '));
     if (failures.length) {
@@ -432,4 +502,10 @@ app.whenReady().then(async () => {
     console.log('\nE2E PASS');
     app.exit(0);
   }
+});
+
+// Anything the scenario throws must end the run, not leave it hanging.
+process.on('unhandledRejection', (err) => {
+  console.log('\nE2E FAIL: ' + (err && err.stack ? err.stack : err));
+  app.exit(1);
 });

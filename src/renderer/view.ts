@@ -55,6 +55,7 @@ export function appearanceVars(config: Config): Record<string, string> {
     '--emote-size': Math.round(config.fontSize * config.emoteScale) + 'px',
     '--badge-size': Math.round(config.fontSize * 1.15) + 'px',
     '--bg': `rgba(10, 12, 18, ${config.bgOpacity})`,
+    '--bg-hover': `rgba(10, 12, 18, ${config.hoverBgOpacity})`,
     '--fade': config.fadeDuration + 's',
   };
 }

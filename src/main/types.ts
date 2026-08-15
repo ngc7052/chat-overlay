@@ -25,6 +25,7 @@ export interface Config {
   fontFamily: string;
   opacity: number;
   bgOpacity: number;
+  hoverBgOpacity: number;
   outline: boolean;
   showTimestamps: boolean;
   platformStyle: PlatformStyle;

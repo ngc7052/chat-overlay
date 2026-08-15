@@ -21,6 +21,18 @@ describe('normaliseConfig', () => {
     expect(c.hotkeyLock).toBe('Control+Alt+O');
   });
 
+  it('defaults to no backdrop when locked, but a visible one on hover', () => {
+    const c = normaliseConfig({});
+    expect(c.bgOpacity).toBe(0);
+    expect(c.hoverBgOpacity).toBeGreaterThan(0);
+  });
+
+  it('keeps the two backdrops independent', () => {
+    const c = normaliseConfig({ bgOpacity: 0.3, hoverBgOpacity: 0.9 });
+    expect(c.bgOpacity).toBe(0.3);
+    expect(c.hoverBgOpacity).toBe(0.9);
+  });
+
   it('copes with junk instead of an object', () => {
     expect(normaliseConfig(null).sources).toEqual([]);
     expect(normaliseConfig('nope').sources).toEqual([]);

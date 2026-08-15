@@ -19,10 +19,20 @@
       <span id="grip-title">ChatOverlay</span>
       <span id="status"></span>
     </div>
-    <button id="btn-update" title="A new version is available" hidden>Update</button>
-    <button id="btn-settings" title="Settings">Settings</button>
-    <button id="btn-reconnect" title="Reconnect all sources">Reconnect</button>
-    <button id="btn-lock" title="Lock: click-through, hides this bar">Lock</button>
+    <button id="btn-update" class="icon-btn accent" title="A new version is available" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span id="update-label">Update</span>
+    </button>
+    <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
+      <svg class="i-gear" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <svg class="i-back" viewBox="0 0 24 24" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+    </button>
+    <button id="btn-reconnect" class="icon-btn" title="Reconnect all channels" aria-label="Reconnect all channels">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/><path d="M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+    </button>
+    <button id="btn-lock" class="icon-btn" title="Hide the bar and let clicks pass through (Ctrl+Alt+O)" aria-label="Hide and lock">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+    </button>
   </div>
 
   <div id="chat" aria-live="polite"></div>
@@ -72,9 +82,13 @@
         <label>Overall opacity <output id="out-opacity"></output>
           <input type="range" id="opacity" min="0.2" max="1" step="0.05" />
         </label>
-        <label>Backdrop <output id="out-bgOpacity"></output>
+        <label>Backdrop while locked <output id="out-bgOpacity"></output>
           <input type="range" id="bgOpacity" min="0" max="0.9" step="0.05" />
         </label>
+        <label>Backdrop on hover, unlocked <output id="out-hoverBgOpacity"></output>
+          <input type="range" id="hoverBgOpacity" min="0" max="0.9" step="0.05" />
+        </label>
+        <p class="hint">Locked shows just the text by default. Unlocked, moving the pointer over the window brings the backdrop up so you can see its edges to move and resize it.</p>
         <label class="check"><input type="checkbox" id="outline" /> Black outline (readable over any game)</label>
         <label class="check"><input type="checkbox" id="showTimestamps" /> Show timestamps</label>
         <label>Platform marker

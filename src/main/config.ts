@@ -11,7 +11,8 @@ export const DEFAULT_CONFIG: Config = {
   fontWeight: 600,
   fontFamily: "'Segoe UI', 'Inter', system-ui, sans-serif",
   opacity: 1,
-  bgOpacity: 0,
+  bgOpacity: 0,          // while locked: nothing behind the text by default
+  hoverBgOpacity: 0.55,  // while unlocked and hovered, so the window can be found
   outline: true,
   showTimestamps: false,
   platformStyle: 'icon',

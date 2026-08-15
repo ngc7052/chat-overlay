@@ -6,6 +6,9 @@
  *   node test/e2e/run.mjs --media             also write docs/media/*.png
  *   node test/e2e/run.mjs --scenario=drop     kill the sockets, expect recovery
  *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
+ *   node test/e2e/run.mjs --scenario=staged   a downloaded payload must be run
+ *   node test/e2e/run.mjs --scenario=trials   one that never starts is dropped
+ *   node test/e2e/run.mjs --scenario=crash    one that throws is quarantined
  *
  * The unit suite covers the rules; this covers the wiring the unit suite
  * deliberately does not — that a message arriving on a socket ends up on screen
@@ -13,7 +16,8 @@
  * the settings panel opens and closes.
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startFakeChat } from './fake-chat-server.mjs';
@@ -46,7 +50,11 @@ const server = await startFakeChat({
   dropAfterMs: scenario === 'drop' ? 4000 : 0,
   failCatalogues: scenario === 'degraded',
 });
-const dataDir = path.join(root, 'dist', 'e2e-profile');
+// Outside the repo on purpose. A real install keeps its payload under
+// %APPDATA%, where no package.json sits above it; inside the repo, node finds
+// the root's "type": "module" and refuses to load a staged payload as
+// CommonJS — an artefact of the harness that a real install never sees.
+const dataDir = path.join(os.tmpdir(), 'chat-overlay-e2e-profile');
 rmSync(dataDir, { recursive: true, force: true });
 mkdirSync(dataDir, { recursive: true });
 
@@ -65,6 +73,35 @@ writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
   maxMessages: 40,
   autoCheckUpdates: false,     // no network in a test run
 }, null, 2));
+
+/**
+ * Put a downloaded payload where boot will find it.
+ *
+ * The app that shipped is copied and renamed to a version far ahead of it, so
+ * boot has a real reason to prefer it — and, for the crash case, a main.js that
+ * throws the moment it is loaded.
+ */
+const STAGED_VERSION = '99.0.0';
+function stagePayload({ broken = false } = {}) {
+  const incoming = path.join(dataDir, 'payload-new');
+  cpSync(path.join(root, 'app', 'payload'), incoming, { recursive: true });
+  writeFileSync(path.join(incoming, 'version.json'), JSON.stringify({ version: STAGED_VERSION }));
+  if (broken) writeFileSync(path.join(incoming, 'main.js'), 'throw new Error("payload is broken");\n');
+  // Written last by the updater, and the only thing that marks it complete.
+  writeFileSync(path.join(incoming, '.staged'), JSON.stringify({ version: STAGED_VERSION }));
+}
+
+if (scenario === 'staged') stagePayload();
+if (scenario === 'crash') stagePayload({ broken: true });
+if (scenario === 'trials') {
+  stagePayload();
+  // Three launches already counted and never cleared: whatever is in there
+  // does not start, and boot has to stop choosing it.
+  writeFileSync(
+    path.join(dataDir, 'payload-state.json'),
+    JSON.stringify({ version: STAGED_VERSION, trials: 3 }),
+  );
+}
 
 const driver = path.join(here, 'driver.cjs');
 const electron = path.join(root, 'node_modules', 'electron', 'cli.js');
@@ -94,6 +131,30 @@ child.stderr.on('data', (d) => {
 
 const code = await new Promise((resolve) => child.on('exit', resolve));
 await server.close();
+
+if (scenario === 'crash') {
+  // boot quarantines the payload and relaunches on the bundled one, so this
+  // process is meant to end non-zero. What matters is what it left on disk.
+  const state = JSON.parse(readFileSync(path.join(dataDir, 'payload-state.json'), 'utf8'));
+  const problems = [];
+  if (code === 0) problems.push('expected a recovery exit, got 0');
+  if (state.quarantined?.version !== STAGED_VERSION) {
+    problems.push(`state does not quarantine ${STAGED_VERSION}: ${JSON.stringify(state)}`);
+  }
+  if (!/threw while loading/.test(state.quarantined?.reason ?? '')) {
+    problems.push(`quarantine reason is not the load failure: ${state.quarantined?.reason}`);
+  }
+  if (existsSync(path.join(dataDir, 'payload'))) problems.push('the broken payload is still installed');
+  if (!existsSync(path.join(dataDir, 'payload-broken'))) problems.push('nothing was moved aside');
+  for (const p of problems) console.error('  FAIL ' + p);
+  if (problems.length) {
+    console.error(`\ne2e FAILED: ${problems.length} check(s) failed`);
+    process.exit(1);
+  }
+  console.log('  ok  a payload that throws is quarantined, and the app relaunches without it');
+  console.log('\ne2e OK');
+  process.exit(0);
+}
 
 if (code !== 0) {
   console.error(`\ne2e FAILED (exit ${code})`);

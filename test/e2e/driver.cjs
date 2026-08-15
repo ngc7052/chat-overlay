@@ -98,6 +98,9 @@ const until = async (js, ms = 3000) => {
 };
 const snap = async (name) => {
   if (!MEDIA) return;
+  // capturePage can hand back the frame before the last change was composited,
+  // which once produced a "settings" screenshot showing the chat.
+  await wait(400);
   fs.mkdirSync(MEDIA, { recursive: true });
   fs.writeFileSync(path.join(MEDIA, PREFIX + name), (await win.capturePage()).toPNG());
 };
@@ -220,6 +223,12 @@ app.whenReady().then(async () => {
   check('nothing inside the grip opts out of dragging', optedOut.length === 0, JSON.stringify(optedOut));
   check('the whole bar is a drag region, empty space included',
     await q(`['bar', 'grip'].every((id) => getComputedStyle(document.getElementById(id)).webkitAppRegion === 'drag')`));
+  // Unlocked, the feed moves the window too, so there is no hunting for a
+  // strip to grab. The scrollbar and the resize corner opt back out.
+  check('the chat area moves the window while unlocked',
+    await q(`getComputedStyle(document.getElementById('chat')).webkitAppRegion === 'drag'`));
+  check('the scrollbar and resize corner stay out of it',
+    await q(`['scroll-guard', 'resize'].every((id) => getComputedStyle(document.getElementById(id)).webkitAppRegion === 'no-drag')`));
 
   // Settings panel opens, closes, and swaps the cog for a back arrow.
   await q(`document.getElementById('btn-settings').click(); true`);
@@ -232,9 +241,15 @@ app.whenReady().then(async () => {
     groups: document.querySelectorAll('#settings .group').length,
     open: Array.from(document.querySelectorAll('#settings .group')).filter((g) => g.open).map((g) => g.id),
     exits: document.querySelectorAll('#settings button[id*="close"], .settings-head').length,
-    // The bar floats above the panel; its content must start below it.
+    // The bar floats above the panel, so both the content and the scroll track
+    // must start below it — a scrollbar running up behind the bar's buttons is
+    // what prompted this.
     clearsBar: document.querySelector('#settings .group').getBoundingClientRect().top
-      >= document.getElementById('bar').getBoundingClientRect().bottom
+      >= document.getElementById('bar').getBoundingClientRect().bottom,
+    scrollerClearsBar: document.querySelector('.settings-body').getBoundingClientRect().top
+      >= document.getElementById('bar').getBoundingClientRect().bottom,
+    // Hit targets in the bar, which were too small to aim at comfortably.
+    iconSize: Math.round(document.getElementById('btn-settings').getBoundingClientRect().height)
   })`));
   check('settings panel opens', settings.painted);
   check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 2), `rows=${settings.rows}`);
@@ -247,6 +262,8 @@ app.whenReady().then(async () => {
   // this: the panel's own header sat underneath the bar's back arrow.
   check('the bar back arrow is the only way out', settings.exits === 0, `exits=${settings.exits}`);
   check('settings content clears the floating bar', settings.clearsBar);
+  check('the settings scroll track clears the bar', settings.scrollerClearsBar);
+  check('bar buttons are a comfortable hit target', settings.iconSize >= 28, `size=${settings.iconSize}`);
   await snap('settings.png');
 
   // Expanding a group reveals its controls.

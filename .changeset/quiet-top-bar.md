@@ -9,8 +9,11 @@ seamless, with the controls floating over the chat and carrying their own
 shadow for contrast.
 
 Hovering the overlay raises the strip back: a translucent band across the top
-with a drag handle, which is what you grab to move the window. The whole bar,
-empty space included, drags. Move the pointer away and it is gone again.
+with a drag handle, which is what you grab to move the window. Move the pointer
+away and it is gone again. The whole bar drags, empty space included — and so
+does the chat feed itself while unlocked, so there is no aiming for a strip at
+all. The scrollbar and the resize corner stay out of it, and the icon buttons
+are larger targets.
 
 The `ChatOverlay` label is gone; it was the boldest text on screen and told you
 nothing. Channel status is now one coloured dot per channel — green connected,

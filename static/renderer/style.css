@@ -16,7 +16,7 @@
   --accent: #6f8cff;
   /* Height of the top bar. The settings panel is drawn under it, so it needs
      to know how far down its content has to start. */
-  --bar-h: 33px;
+  --bar-h: 38px;
 }
 
 * { box-sizing: border-box; }
@@ -171,8 +171,8 @@ body:not(.locked):hover .src-names { opacity: 1; }
   background: transparent;
   color: var(--ui-dim);
   border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 4px;
+  border-radius: 6px;
+  padding: 5px;
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -182,8 +182,8 @@ body:not(.locked):hover .src-names { opacity: 1; }
    so without this the Update button would show even when there is no update. */
 #bar button[hidden] { display: none !important; }
 #bar button svg {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
   display: block;
   /* The bar has no fill of its own, so the icons carry their own contrast
      against whatever game is behind them. */
@@ -228,7 +228,33 @@ body.settings-open #btn-settings { color: var(--ui-text); background: var(--ui-b
 #chat::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
 #chat::-webkit-scrollbar-track { background: transparent; }
 
+/*
+ * Unlocked, the chat itself moves the window: there is no text to select
+ * (selection is off globally) and no link to click, so dragging anywhere in
+ * the feed is free. Tied to the lock class, never to :hover — a drag region
+ * that appears and disappears under the pointer is what caused the bar to
+ * flicker.
+ */
+body:not(.locked) #chat { -webkit-app-region: drag; }
+
+/* Keeps the scrollbar grabbable: an invisible strip over it that opts out of
+   dragging. pointer-events: none so clicks still reach the scrollbar itself.
+   The wheel is unaffected either way — it works inside a drag region. */
+#scroll-guard {
+  position: fixed;
+  top: var(--bar-h);
+  right: 0;
+  bottom: 16px;
+  width: 12px;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+  z-index: 41;
+}
+body.locked #scroll-guard { display: none; }
+
 #resize {
+  /* Must opt out, or dragging the corner would move the window instead. */
+  -webkit-app-region: no-drag;
   position: fixed;
   right: 0;
   bottom: 0;
@@ -364,6 +390,10 @@ body.outline .msg {
   flex-direction: column;
   background: var(--ui-bg);
   color: var(--ui-text);
+  /* Leaves the bar its own strip. Padding here rather than on the scrolling
+     body, so the scrollbar starts below the bar instead of running up behind
+     its buttons. */
+  padding-top: var(--bar-h);
   font-size: 12px;
   font-weight: 400;
 }
@@ -376,9 +406,7 @@ body.outline .msg {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  /* The bar floats above this panel (it is the way out of it), so the first
-     group has to start below the bar rather than underneath its icons. */
-  padding: var(--bar-h) 10px 14px;
+  padding: 0 10px 14px;
   min-width: 0;
 }
 

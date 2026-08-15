@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { activeSources, defaultConfig, parseConfig } from './config.js';
 import { resolveEndpoints, rewriteApiUrl } from './endpoints.js';
 import type { Config, PayloadHandoff, ReleaseInfo } from './types.js';
+import { watchPointer } from './pointer.js';
 import { createUpdater } from './updater/index.js';
 
 /** Window, tray, hotkeys and IPC. The decisions live in the modules it calls. */
@@ -150,7 +151,18 @@ function createWindow(): void {
   };
   win.on('moved', persistBounds);
   win.on('resized', persistBounds);
-  win.on('closed', () => { win = null; });
+
+  // Whether the pointer is over the window, tracked here rather than with CSS
+  // :hover in the page. A drag region is handled as window chrome, so the page
+  // never sees the mouse over the parts of it that move the window — which is
+  // most of them.
+  const pointerWatch = watchPointer({
+    bounds: () => (win && !win.isDestroyed() ? win.getBounds() : null),
+    cursor: () => screen.getCursorScreenPoint(),
+    onChange: (over) => sendToWindow('state:pointerOver', over),
+  });
+
+  win.on('closed', () => { pointerWatch.stop(); win = null; });
 
   // Never navigate away; open any external link in the real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {

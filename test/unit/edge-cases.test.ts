@@ -5,7 +5,7 @@ import { addSevenTv, normaliseGgCatalogue } from '../../src/renderer/emotes/cata
 import { GoodGameSource } from '../../src/renderer/sources/goodgame.js';
 import { TwitchSource } from '../../src/renderer/sources/twitch.js';
 import type { EmoteEntry, SocketLike } from '../../src/renderer/sources/types.js';
-import { statusLine } from '../../src/renderer/view.js';
+import { statusDots } from '../../src/renderer/view.js';
 
 /**
  * Defensive paths that the happy-path tests never reach. They exist because the
@@ -61,13 +61,14 @@ describe('updater without AbortSignal.timeout', () => {
   });
 });
 
-describe('statusLine with an unexpected state', () => {
-  it('falls back to the neutral mark', () => {
-    const line = statusLine(
+describe('statusDots with an unexpected state', () => {
+  it('passes the state through, leaving the neutral dot to the stylesheet', () => {
+    // Only online/error/connecting are given a colour; anything else lands on
+    // the default grey rather than on no dot at all.
+    expect(statusDots(
       [{ key: 'k', platform: 'twitch', channel: 'c' }],
       new Map([['k', { state: 'offline' as const, detail: '' }]]),
-    );
-    expect(line).toBe('○ tw/c');
+    )).toEqual([{ key: 'k', label: 'tw/c', state: 'offline', title: 'tw/c — offline' }]);
   });
 });
 

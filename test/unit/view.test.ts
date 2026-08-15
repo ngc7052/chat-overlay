@@ -4,7 +4,7 @@ import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage } from '../../src/renderer/sources/types.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  plainText, shouldDrop, sourceDotClass, statusLine, visibleBadges,
+  plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -140,36 +140,41 @@ describe('appearanceVars', () => {
   });
 });
 
-describe('statusLine', () => {
+describe('statusDots', () => {
   const sources = [
     { key: 'twitch:xqc', platform: 'twitch', channel: 'xqc' },
     { key: 'goodgame:ann', platform: 'goodgame', channel: 'ann' },
   ];
 
-  it('says so when nothing is configured', () => {
-    expect(statusLine([], new Map())).toBe('no channels configured');
+  it('shows nothing when no channel is configured', () => {
+    // The chat body carries the "add one" hint; the bar stays empty.
+    expect(statusDots([], new Map())).toEqual([]);
   });
 
-  it('marks each source with its state', () => {
+  it('carries one dot per source, in its state', () => {
     const states = new Map([
       ['twitch:xqc', { state: 'online' as const, detail: '' }],
       ['goodgame:ann', { state: 'error' as const, detail: 'boom' }],
     ]);
-    expect(statusLine(sources, states)).toBe('● tw/xqc   ▲ gg/ann (boom)');
+    expect(statusDots(sources, states)).toEqual([
+      { key: 'twitch:xqc', label: 'tw/xqc', state: 'online', title: 'tw/xqc — online' },
+      { key: 'goodgame:ann', label: 'gg/ann', state: 'error', title: 'gg/ann — error — boom' },
+    ]);
   });
 
-  it('shows a retry detail while reconnecting', () => {
+  it('puts the retry detail in the tooltip while reconnecting', () => {
     const states = new Map([['twitch:xqc', { state: 'connecting' as const, detail: 'retry in 3s' }]]);
-    expect(statusLine([sources[0]!], states)).toBe('○ tw/xqc (retry in 3s)');
+    expect(statusDots([sources[0]!], states)[0]?.title).toBe('tw/xqc — connecting — retry in 3s');
   });
 
-  it('hides the detail once online', () => {
+  it('drops the detail once online, where it is no longer a problem', () => {
     const states = new Map([['twitch:xqc', { state: 'online' as const, detail: 'stream title' }]]);
-    expect(statusLine([sources[0]!], states)).toBe('● tw/xqc');
+    expect(statusDots([sources[0]!], states)[0]?.title).toBe('tw/xqc — online');
   });
 
   it('assumes connecting for a source with no state yet', () => {
-    expect(statusLine([sources[0]!], new Map())).toBe('○ tw/xqc');
+    expect(statusDots([sources[0]!], new Map())[0])
+      .toEqual({ key: 'twitch:xqc', label: 'tw/xqc', state: 'connecting', title: 'tw/xqc — connecting' });
   });
 });
 

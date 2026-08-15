@@ -14,6 +14,9 @@
   --ui-text: #e6ebf5;
   --ui-dim: #9aa7bd;
   --accent: #6f8cff;
+  /* Height of the top bar. The settings panel is drawn under it, so it needs
+     to know how far down its content has to start. */
+  --bar-h: 38px;
 }
 
 * { box-sizing: border-box; }
@@ -44,11 +47,31 @@ body { display: flex; flex-direction: column; }
   align-items: center;
   gap: 6px;
   padding: 4px 6px;
-  background: var(--ui-bg);
-  border-bottom: 1px solid var(--ui-line);
+  /* Invisible at rest: this is a control surface that exists only while
+     unlocked, not a window titlebar, and a permanent strip reads as chrome
+     bolted onto a transparent window. It appears on hover — see below. */
+  background: transparent;
+  min-height: var(--bar-h);
+  /* The whole strip drags, empty space included; the buttons opt out. */
+  -webkit-app-region: drag;
+  cursor: move;
+  transition: background-color .12s linear, box-shadow .12s linear;
   font-size: 12px;
   font-weight: 600;
   color: var(--ui-text);
+}
+
+/*
+ * Hovered and unlocked: the strip appears, so there is something solid to aim
+ * at and drag the window by. Locked, and while the pointer is elsewhere, it
+ * stays invisible — that is the whole point of an overlay.
+ *
+ * The separator is an inset box-shadow rather than a border because a border
+ * would grow the box: see .src-name for what resizing the bar on hover does.
+ */
+body:not(.locked).pointer-over #bar {
+  background: rgba(16, 20, 30, .72);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, .14);
 }
 
 #grip {
@@ -62,18 +85,82 @@ body { display: flex; flex-direction: column; }
   -webkit-app-region: drag;
   cursor: move;
 }
-#grip:hover { background: var(--ui-bg-soft); }
-#grip-title { flex: 0 0 auto; }
+/* Where to grab the window. Without the old solid strip there was nothing to
+   aim at, so the handle and a faint fill appear whenever the pointer is over
+   the overlay — the same signal that brings the backdrop up. */
+#drag-handle {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+  color: var(--ui-dim);
+  opacity: 0;
+  /* Background, not padding or size — see the note on .src-name: anything that
+     changes the bar's layout on hover sets off a flicker loop. */
+  border-radius: 4px;
+  transition: opacity .15s ease, background-color .15s ease;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
+}
+body:not(.locked).pointer-over #drag-handle { opacity: .85; background: rgba(255, 255, 255, .1); }
+
 #status {
   flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
   white-space: nowrap;
   font-weight: 400;
   font-size: 11px;
   color: var(--ui-dim);
 }
+
+/* One dot per channel; its colour carries the state, its name fades in on
+   hover. Deliberately NOT no-drag: making the dots clickable stole drag
+   surface from the bar, right where the pointer arrives to grab the window.
+   Reconnect has its own button. */
+.src-dots {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.src-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ui-dim);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+}
+.src-dot.online { background: #3fb950; }
+.src-dot.error { background: #f85149; }
+.src-dot.connecting { background: #d29922; }
+
+/*
+ * The channel names, revealed by hovering the window — the same signal that
+ * fades the backdrop in. Hovering the bar itself is not usable: most of it is
+ * an app-region drag surface, which never delivers hover to the page.
+ *
+ * Fading only, and from a zero-width box whose contents paint past its edge.
+ * Nothing here may change layout: the bar is a drag region, so resizing it
+ * makes Chromium recompute that region, which disturbs the pointer state,
+ * which drops the hover, which resizes it back — an oscillation several times
+ * a second that makes the bar unusable. Reserving the space instead would
+ * spread the dots apart, which is what the zero width avoids.
+ */
+.src-names {
+  flex: 0 0 auto;
+  width: 0;
+  margin-left: 5px;
+  display: flex;
+  gap: 9px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+.src-name { text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+body:not(.locked).pointer-over .src-names { opacity: 1; }
 
 #bar button {
   -webkit-app-region: no-drag;
@@ -84,8 +171,8 @@ body { display: flex; flex-direction: column; }
   background: transparent;
   color: var(--ui-dim);
   border: 1px solid transparent;
-  border-radius: 5px;
-  padding: 4px;
+  border-radius: 6px;
+  padding: 5px;
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -95,9 +182,12 @@ body { display: flex; flex-direction: column; }
    so without this the Update button would show even when there is no update. */
 #bar button[hidden] { display: none !important; }
 #bar button svg {
-  width: 15px;
-  height: 15px;
+  width: 18px;
+  height: 18px;
   display: block;
+  /* The bar has no fill of its own, so the icons carry their own contrast
+     against whatever game is behind them. */
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .95));
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -138,7 +228,33 @@ body.settings-open #btn-settings { color: var(--ui-text); background: var(--ui-b
 #chat::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
 #chat::-webkit-scrollbar-track { background: transparent; }
 
+/*
+ * Unlocked, the chat itself moves the window: there is no text to select
+ * (selection is off globally) and no link to click, so dragging anywhere in
+ * the feed is free. Tied to the lock class, never to :hover — a drag region
+ * that appears and disappears under the pointer is what caused the bar to
+ * flicker.
+ */
+body:not(.locked) #chat { -webkit-app-region: drag; }
+
+/* Keeps the scrollbar grabbable: an invisible strip over it that opts out of
+   dragging. pointer-events: none so clicks still reach the scrollbar itself.
+   The wheel is unaffected either way — it works inside a drag region. */
+#scroll-guard {
+  position: fixed;
+  top: var(--bar-h);
+  right: 0;
+  bottom: 16px;
+  width: 12px;
+  pointer-events: none;
+  -webkit-app-region: no-drag;
+  z-index: 41;
+}
+body.locked #scroll-guard { display: none; }
+
 #resize {
+  /* Must opt out, or dragging the corner would move the window instead. */
+  -webkit-app-region: no-drag;
   position: fixed;
   right: 0;
   bottom: 0;
@@ -156,7 +272,7 @@ body.settings-open #btn-settings { color: var(--ui-text); background: var(--ui-b
  * the window's edges are visible to drag and resize. Locked stays exactly as
  * configured, which by default is nothing at all — just the text.
  */
-body:not(.locked):hover #chat {
+body:not(.locked).pointer-over #chat {
   background: var(--bg-hover);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .10);
 }
@@ -274,6 +390,15 @@ body.outline .msg {
   flex-direction: column;
   background: var(--ui-bg);
   color: var(--ui-text);
+  /* Must opt out explicitly. Drawing on top of the chat is not enough: an
+     element with no app-region of its own does not mask the drag rect
+     underneath it, so every control in here became drag surface and stopped
+     responding to clicks. */
+  -webkit-app-region: no-drag;
+  /* Leaves the bar its own strip. Padding here rather than on the scrolling
+     body, so the scrollbar starts below the bar instead of running up behind
+     its buttons. */
+  padding-top: var(--bar-h);
   font-size: 12px;
   font-weight: 400;
 }
@@ -282,43 +407,45 @@ body.outline .msg {
    so the hidden attribute alone would never actually hide the panel. */
 #settings[hidden] { display: none !important; }
 
-.settings-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--ui-line);
-}
-.settings-head button {
-  background: var(--accent);
-  color: #0d1220;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  padding: 4px 12px;
-  font: inherit;
-  font-weight: 700;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.settings-head button:hover { filter: brightness(1.12); }
-
 .settings-body {
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 4px 10px 14px;
+  padding: 0 10px 14px;
   min-width: 0;
 }
-.settings-body section { padding: 8px 0; border-bottom: 1px solid var(--ui-line); }
-.settings-body section:last-child { border-bottom: 0; }
-.settings-body h3 {
-  margin: 2px 0 8px;
+
+/* One collapsible group per topic. Everything but Channels starts closed, so
+   the panel opens as a short list of headings instead of a wall of controls. */
+.group { border-bottom: 1px solid var(--ui-line); }
+.group:last-child { border-bottom: 0; }
+.group > summary {
+  padding: 9px 2px;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--ui-dim);
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  user-select: none;
 }
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .15s ease;
+}
+.group[open] > summary::before { transform: rotate(45deg); }
+.group > summary:hover { color: var(--ui-text); }
+.group[open] > summary { color: var(--ui-text); }
+.group > *:last-child { margin-bottom: 10px; }
 
 #settings label { display: block; margin-bottom: 8px; color: var(--ui-text); }
 #settings label.check { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }

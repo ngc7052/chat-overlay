@@ -7,7 +7,7 @@ import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/type
 import { debounce, timeString, type MessagePart } from './util.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  shouldDrop, sourceDotClass, statusLine, visibleBadges, type SourceStatus,
+  shouldDrop, sourceDotClass, statusDots, visibleBadges, type SourceStatus,
 } from './view.js';
 
 /** DOM wiring. The rules it applies live in ./view and ./sources. */
@@ -34,6 +34,7 @@ interface OverlayApi {
   onLocked(cb: (locked: boolean) => void): void;
   onHotkeys(cb: (s: { lock: boolean; hide: boolean }) => void): void;
   onReconnect(cb: () => void): void;
+  onPointerOver(cb: (over: boolean) => void): void;
 }
 
 interface UpdateInfo {
@@ -284,11 +285,34 @@ function systemLine(text: string): void {
 
 /* ---------------------------------------------------------------- status */
 
+function reconnectAll(): void {
+  clearAll();
+  rebuildSources();
+}
+
 function renderStatus(): void {
-  statusEl.textContent = statusLine(
+  const dots = statusDots(
     sources.map((s) => ({ key: s.key, platform: s.platform, channel: s.channel })),
     states,
   );
+  // Dots and names are two groups, not one pair each: the names live in a
+  // zero-width box and paint past its edge, so revealing them cannot move the
+  // dots or resize the bar. See style.css for why that matters.
+  const dotRow = document.createElement('span');
+  dotRow.className = 'src-dots';
+  const nameRow = document.createElement('span');
+  nameRow.className = 'src-names';
+  for (const d of dots) {
+    const dot = document.createElement('span');
+    dot.className = 'src-dot ' + d.state;
+    dot.title = d.title;
+    dotRow.append(dot);
+    const name = document.createElement('span');
+    name.className = 'src-name';
+    name.textContent = d.label;
+    nameRow.append(name);
+  }
+  statusEl.replaceChildren(dotRow, nameRow);
   refreshSourceDots();
 }
 
@@ -541,17 +565,35 @@ function showSettings(show: boolean): void {
 }
 
 settingsBtn.addEventListener('click', () => showSettings(settingsEl.hidden));
-$('btn-settings-close').addEventListener('click', () => showSettings(false));
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsEl.hidden) showSettings(false);
 });
+
+// Which settings groups are expanded, kept between sessions. This is a view
+// preference, not configuration, so it lives in localStorage rather than in
+// config.json where it would need a schema and a migration.
+(() => {
+  const KEY = 'settings-open-groups';
+  const groups = Array.from(document.querySelectorAll<HTMLDetailsElement>('#settings .group'));
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    if (Array.isArray(saved)) groups.forEach((g) => { g.open = saved.includes(g.id); });
+  } catch { /* a corrupt entry just means the defaults stand */ }
+  for (const g of groups) {
+    g.addEventListener('toggle', () => {
+      try {
+        localStorage.setItem(KEY, JSON.stringify(groups.filter((x) => x.open).map((x) => x.id)));
+      } catch { /* quota — remembering this is best effort */ }
+    });
+  }
+})();
 $('btn-add-source').addEventListener('click', () => {
   config.sources.push({ platform: 'twitch', channel: '', enabled: true });
   persist({ sources: config.sources });
   renderSourceRows();
 });
 $('btn-lock').addEventListener('click', () => void overlay.setLocked(true));
-$('btn-reconnect').addEventListener('click', () => { clearAll(); rebuildSources(); });
+$('btn-reconnect').addEventListener('click', reconnectAll);
 $('btn-quit').addEventListener('click', () => void overlay.quit());
 
 // Custom resize grip: a frameless transparent window has no OS resize border.
@@ -652,7 +694,10 @@ overlay.onUpdateError((msg) => setUpdateStatus('Check failed: ' + msg));
 /* ------------------------------------------------------------------ boot */
 
 overlay.onLocked(applyLocked);
-overlay.onReconnect(() => { clearAll(); rebuildSources(); });
+overlay.onReconnect(reconnectAll);
+// Reported by the main process rather than read from CSS :hover, which a drag
+// region would swallow. Drives the backdrop and the bar.
+overlay.onPointerOver((over) => document.body.classList.toggle('pointer-over', over));
 overlay.onHotkeys((ok) => {
   const failed: string[] = [];
   if (!ok.lock) failed.push(config.hotkeyLock);

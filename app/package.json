@@ -3,7 +3,7 @@
   "productName": "ChatOverlay",
   "version": "1.0.0",
   "description": "Transparent always-on-top chat overlay for GoodGame.ru and Twitch",
-  "main": "main.js",
+  "main": "boot.js",
   "author": "",
   "license": "MIT"
 }

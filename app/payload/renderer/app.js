@@ -318,7 +318,7 @@
 
   const CHECK_FIELDS = [
     'outline', 'showTimestamps', 'boldNames', 'exactColors',
-    'showSystem', 'emotes', 'thirdPartyEmotes', 'hideCommands',
+    'showSystem', 'emotes', 'thirdPartyEmotes', 'hideCommands', 'autoCheckUpdates',
   ];
 
   function bindSettings() {
@@ -565,6 +565,136 @@
 
   /* ------------------------------------------------------------------ boot */
 
+  /* --------------------------------------------------------------- updates */
+
+  const updateBtn = document.getElementById('btn-update');
+  const updateStatus = document.getElementById('update-status');
+  const applyBtn = document.getElementById('btn-apply-update');
+  const checkBtn = document.getElementById('btn-check-update');
+  let available = null;    // last update offered by main, or null
+  let busy = false;        // a download / restart is in flight
+  let announced = null;    // version already mentioned in the feed — say it once
+
+  function setUpdateStatus(text) {
+    if (updateStatus) updateStatus.textContent = text;
+  }
+
+  async function refreshVersion(suffix) {
+    const v = await window.overlay.updateVersion();
+    setUpdateStatus('Version ' + v.version + (suffix ? ' — ' + suffix : ''));
+  }
+
+  /** Button labels for the current offer; left alone while a download runs. */
+  function setUpdateButtons() {
+    if (busy) return;
+    if (!available) {
+      updateBtn.hidden = true;
+      applyBtn.hidden = true;
+      return;
+    }
+    if (available.quarantined) {
+      // Tried before and thrown out by boot.js: no bar button, no nag — just a
+      // retry inside Settings for whoever really wants it.
+      updateBtn.hidden = true;
+      applyBtn.hidden = false;
+      applyBtn.textContent = 'Retry v' + available.version;
+      return;
+    }
+    updateBtn.hidden = false;
+    applyBtn.hidden = false;
+    updateBtn.textContent = available.staged ? 'Restart to update' : 'Update to ' + available.version;
+    applyBtn.textContent = available.staged ? 'Restart to finish updating' : 'Download and restart';
+  }
+
+  // Main re-sends this on every successful check while an update is pending,
+  // so everything here must be idempotent.
+  function offerUpdate(info) {
+    available = info;
+    setUpdateButtons();
+    if (info.quarantined) {
+      setUpdateStatus('Version ' + info.current + ' — v' + info.version + ' was disabled after it failed to start');
+      return;
+    }
+    setUpdateStatus(info.staged
+      ? 'v' + info.version + ' downloaded — restart to apply'
+      : 'Version ' + info.current + ' — v' + info.version + ' available');
+    // Locked users never see the bar, so say it in the feed too — once.
+    if (announced !== info.version) {
+      announced = info.version;
+      systemLine('Version ' + info.version + ' is available — unlock and click Update.');
+    }
+  }
+
+  function clearOffer(info) {
+    available = null;
+    setUpdateButtons();
+    if (info && info.current) setUpdateStatus('Version ' + info.current + ' — up to date');
+  }
+
+  function systemLine(text) {
+    addMessage({
+      id: 'sys:' + Date.now() + ':' + Math.random().toString(36).slice(2, 7),
+      platform: 'goodgame',
+      channel: '',
+      user: '',
+      userLogin: '',
+      color: '#b9c6dc',
+      badges: [],
+      parts: [{ type: 'text', value: text }],
+      kind: 'system',
+      ts: Date.now(),
+    });
+  }
+
+  async function applyUpdate() {
+    if (busy || !available) return;
+    busy = true;
+    updateBtn.textContent = 'Downloading…';
+    applyBtn.textContent = 'Downloading…';
+    try {
+      // Main answers { error } rather than throwing, so a failure message is ours.
+      const res = await window.overlay.updateApply();
+      if (res && res.error) throw new Error(res.error);
+      if (res && res.manual) {
+        setUpdateStatus('This release needs the full download — opened in your browser.');
+        busy = false;
+        setUpdateButtons();
+        return;
+      }
+      setUpdateStatus('v' + res.version + ' ready — restarting…');
+      updateBtn.textContent = 'Restarting…';
+      applyBtn.textContent = 'Restarting…';
+      setTimeout(() => window.overlay.updateRestart(), 600);
+      // Should the restart not happen, do not stay wedged: offer it again as a
+      // plain restart (main already has the files, it will not re-download).
+      setTimeout(() => {
+        busy = false;
+        if (available) offerUpdate({ ...available, staged: true });
+      }, 5000);
+    } catch (err) {
+      setUpdateStatus('Update failed: ' + err.message);
+      systemLine('Update failed: ' + err.message);
+      busy = false;
+      setUpdateButtons();
+    }
+  }
+
+  updateBtn.addEventListener('click', () => {
+    showSettings(true);
+    applyUpdate();
+  });
+  applyBtn.addEventListener('click', applyUpdate);
+  checkBtn.addEventListener('click', async () => {
+    setUpdateStatus('Checking…');
+    const res = await window.overlay.updateCheck();
+    // Everything else arrives through update:available / update:none.
+    if (res && res.error) setUpdateStatus('Check failed: ' + res.error);
+  });
+
+  window.overlay.onUpdateAvailable(offerUpdate);
+  window.overlay.onUpdateNone(clearOffer);
+  window.overlay.onUpdateError((msg) => setUpdateStatus('Check failed: ' + msg));
+
   window.overlay.onLocked(applyLocked);
   window.overlay.onReconnect(() => { clearAll(); rebuildSources(); });
   window.overlay.onHotkeys((ok) => {
@@ -585,7 +715,10 @@
     bindSettings();
     renderSourceRows();
     rebuildSources();
+    refreshVersion();
     // Nothing configured yet: put the user straight where channels are added.
     if (config.sources.length === 0 && !config.locked) showSettings(true);
+    // Everything above ran: tell boot.js this payload works.
+    window.overlay.ready();
   });
 })();

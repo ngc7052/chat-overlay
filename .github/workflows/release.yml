@@ -26,7 +26,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0        # tags decide whether this version is already out
 
@@ -48,7 +48,7 @@ jobs:
             echo "::notice::v$VERSION has no tag yet — building a release"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.v.outputs.publish == 'true'
         with:
           node-version: 22
@@ -60,7 +60,7 @@ jobs:
 
       - name: Cache Electron runtime
         if: steps.v.outputs.publish == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: dist/electron-v*-win32-x64.zip
           key: electron-${{ steps.v.outputs.electron }}-win32-x64

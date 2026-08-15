@@ -10,7 +10,7 @@ other people's installs.
 npm install                # ELECTRON_SKIP_BINARY_DOWNLOAD=1 if you only need to test
 npm run typecheck          # tsc --noEmit
 npm test                   # unit tests
-npm run coverage           # unit tests + the 100% thresholds
+npm run coverage           # unit + integration tests, and the 100% thresholds
 npm run e2e                # end-to-end against a local fake chat server
 npm run e2e:media          # re-capture the README demos (needs network)
 npm run check              # typecheck + coverage + e2e — run this before pushing
@@ -62,6 +62,28 @@ Electron and DOM wiring (`src/main/index.ts`, `src/boot/index.ts`,
 `src/preload/`, `src/renderer/index.ts`) is **excluded** from coverage on
 purpose. Covering it would mean asserting that mocks were called, which passes
 just as happily when the app is broken. It is covered by the e2e instead.
+
+### Integration — real filesystem, real HTTP
+
+`test/integration/` covers the update path with nothing mocked out: a payload
+packed by the same `tools/make-payload` the release uses, served over a local
+HTTP server the way GitHub serves it, downloaded through the real updater into
+a real temp directory, then handed to the real boot-time store.
+
+This tier exists because the unit tests around those modules inject a fake
+`fs`, so they prove the rules and not the outcome — and this is the one
+subsystem that rewrites the app on disk, where a bad release bricks every
+install. It covers the guarantees that matter: the running payload is never
+touched, every file is re-read and hash-checked after it lands, the completion
+marker is genuinely the last write, and a package that is truncated, tampered
+with, mis-versioned, missing a required file, or carrying a path that escapes
+the directory is refused before anything is installed.
+
+Each of those was checked by mutation: break the guarantee in `src/`, confirm
+a test goes red, put it back. An assertion nobody has seen fail is a guess. The
+first version of the "marker written last" check passed against code that wrote
+it first, because several files land in the same millisecond and it compared
+mtimes; it records the write order now.
 
 ### End-to-end — deterministic
 

@@ -564,7 +564,9 @@ function showSettings(show: boolean): void {
   if (!show && autoScroll) scrollToBottom();
 }
 
-settingsBtn.addEventListener('click', () => showSettings(settingsEl.hidden));
+// `hidden` is boolean | "until-found" in current DOM types, so it is coerced
+// rather than passed through: anything hidden at all means "open it".
+settingsBtn.addEventListener('click', () => showSettings(!!settingsEl.hidden));
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !settingsEl.hidden) showSettings(false);
 });

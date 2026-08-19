@@ -94,7 +94,8 @@ function coordinate(value: unknown): number | null {
 function isSource(value: unknown): value is SourceConfig {
   if (!value || typeof value !== 'object') return false;
   const s = value as Partial<SourceConfig>;
-  return (s.platform === 'twitch' || s.platform === 'goodgame') && typeof s.channel === 'string';
+  const known = s.platform === 'twitch' || s.platform === 'goodgame' || s.platform === 'youtube';
+  return known && typeof s.channel === 'string';
 }
 
 /**

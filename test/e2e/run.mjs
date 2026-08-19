@@ -7,6 +7,8 @@
  *   node test/e2e/run.mjs --scenario=drop     kill the sockets, expect recovery
  *   node test/e2e/run.mjs --scenario=stall    hold them open and go silent
  *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
+ *   node test/e2e/run.mjs --scenario=yt-offline a youtube channel that is not live yet
+ *   node test/e2e/run.mjs --scenario=yt-ended   a youtube stream that ends mid-chat
  *   node test/e2e/run.mjs --scenario=staged   a downloaded payload must be run
  *   node test/e2e/run.mjs --scenario=trials   one that never starts is dropped
  *   node test/e2e/run.mjs --scenario=crash    one that throws is quarantined
@@ -51,6 +53,11 @@ const server = await startFakeChat({
   dropAfterMs: scenario === 'drop' ? 4000 : 0,
   stallAfterMs: scenario === 'stall' ? 4000 : 0,
   failCatalogues: scenario === 'degraded',
+  // A YouTube channel is not an address but a stream, so "offline" and "over"
+  // are ordinary states rather than failures — and neither has an analogue in
+  // either socket protocol.
+  ytLiveAfterMs: scenario === 'yt-offline' ? 6000 : 0,
+  ytEndAfterMs: scenario === 'yt-ended' ? 4000 : 0,
 });
 // Outside the repo on purpose. A real install keeps its payload under
 // %APPDATA%, where no package.json sits above it; inside the repo, node finds
@@ -63,16 +70,29 @@ mkdirSync(dataDir, { recursive: true });
 const allSources = [
   { platform: 'twitch', channel: 'halcyon_tv', enabled: true },
   { platform: 'goodgame', channel: 'vetroduy', enabled: true },
+  { platform: 'youtube', channel: '@northlight', enabled: true },
 ];
 
+/**
+ * drop and stall are about what a *socket* does when it dies without saying so,
+ * and about the bar's "every channel is down" wording. A polling source that
+ * carries on regardless would not strengthen either — it would only mean two of
+ * three channels are down instead of all of them, and quietly retire the one
+ * assertion that tells the two messages apart. YouTube gets its own scenarios.
+ */
+const socketScenario = scenario === 'drop' || scenario === 'stall';
+const sources = only
+  ? allSources.filter((s) => s.platform === only)
+  : allSources.filter((s) => !socketScenario || s.platform !== 'youtube');
+
 writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
-  sources: only ? allSources.filter((s) => s.platform === only) : allSources,
+  sources,
   locked: false,
   bounds: { x: 60, y: 60, width: 560, height: 520 },
   bgOpacity: 0,
   hoverBgOpacity: 0.55,
   fontSize: 15,
-  maxMessages: 40,
+  maxMessages: 60,     // above the 43 lines the three transcripts add up to, so nothing is trimmed mid-run
   autoCheckUpdates: false,     // no network in a test run
 }, null, 2));
 
@@ -121,7 +141,11 @@ const child = spawn(process.execPath, [electron, '--no-sandbox', driver], {
     // Four minutes of patience is right for a real install and impossible for a
     // test run, so the stall scenario shrinks the watchdog to a couple of
     // seconds. Every other run leaves it empty and gets the shipped numbers.
-    OVERLAY_TEST_WATCHDOG_MS: scenario === 'stall' ? '2500' : '',
+    OVERLAY_TEST_WATCHDOG_MS: scenario === 'stall' ? '2500'
+      // For YouTube this is also how long a channel that is not live waits
+      // before asking again — two minutes in a real install, which is right
+      // when the page that answers is over a megabyte, and impossible here.
+      : (scenario === 'yt-offline' || scenario === 'yt-ended') ? '2000' : '',
     // Same idea for the pause the bar takes before reporting a connection as
     // down: seconds of deliberate patience in a real install, a moment here.
     OVERLAY_TEST_ALERT_MS: scenario === 'drop' || scenario === 'stall' ? '400' : '',

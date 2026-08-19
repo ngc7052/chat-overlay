@@ -250,6 +250,70 @@ async function scenarioStall() {
     `atStall=${atStall} after=${await q(MSGS)}`);
 }
 
+/**
+ * A YouTube channel that is not live.
+ *
+ * The state neither socket has: nothing is broken, there is simply no stream to
+ * read yet, and most channels are in it most of the time. The overlay has to say
+ * so — while locked the feed is the only surface it has — keep asking on its own
+ * slow cadence, and connect itself when the stream starts, with nobody pressing
+ * anything. The server starts serving a live page six seconds in.
+ */
+async function scenarioYtOffline() {
+  check('the other two connect regardless',
+    await until(`JSON.parse(${DOTS}).filter((c) => c.includes('online')).length >= 2`, 20000),
+    await q(DOTS));
+
+  check('the feed says the channel is not live, rather than leaving it blank',
+    await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 15000),
+    await q(`document.body.textContent.slice(-300)`));
+  check('and the dot says offline rather than error',
+    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /yt\\/@northlight — offline/.test(d.title))`, 15000),
+    await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
+
+  // Six seconds in the channel goes live. Nothing is pressed.
+  check('it connects by itself once the channel goes live',
+    await until(`/connected — youtube\\/@northlight/.test(document.body.textContent)`, 30000),
+    await q(`document.body.textContent.slice(-300)`));
+  check('and the chat then arrives',
+    await until(`document.querySelectorAll('.msg[data-platform="youtube"]').length > 0`, 20000));
+  check('every channel is online in the end',
+    await until(`JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 20000), await q(DOTS));
+
+  // It said it once, not once per check — the cadence must not become a log.
+  const said = Number(await q(`(document.body.textContent.match(/not live — youtube/g) || []).length`));
+  check('it said so once, not on every re-check', said === 1, `said=${said}`);
+}
+
+/**
+ * A YouTube stream that ends while the overlay is open.
+ *
+ * Not silence — the poll is answered, and answered correctly, with no
+ * continuation left to follow. That is a positive signal that the chat is over,
+ * so it goes out through the same door every other disconnect uses instead of
+ * waiting on a watchdog, and then the source starts looking again.
+ */
+async function scenarioYtEnded() {
+  check('youtube connects and delivers chat first',
+    await until(`document.querySelectorAll('.msg[data-platform="youtube"]').length > 0`, 20000),
+    await q(`document.querySelectorAll('.msg[data-platform="youtube"]').length`));
+  const before = Number(await q(`document.querySelectorAll('.msg[data-platform="youtube"]').length`));
+
+  // Four seconds in the server stops offering a continuation.
+  check('the end of the stream is noticed at once, not waited out',
+    await until(`/lost — youtube\\/@northlight/.test(document.body.textContent)`, 20000),
+    await q(`document.body.textContent.slice(-300)`));
+  check('the messages already on screen are left alone',
+    Number(await q(`document.querySelectorAll('.msg[data-platform="youtube"]').length`)) >= before,
+    `before=${before}`);
+  check('and it goes back to looking rather than giving up',
+    await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 25000),
+    await q(`document.body.textContent.slice(-300)`));
+  check('the other two carry on throughout',
+    await until(`JSON.parse(${DOTS}).filter((c) => c.includes('online')).length >= 2`, 20000),
+    await q(DOTS));
+}
+
 const stateFile = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(PROFILE, 'payload-state.json'), 'utf8'));
@@ -314,7 +378,9 @@ async function scenarioDegraded() {
   check('messages still render', await until(`${MSGS} >= 20`, 20000), `msgs=${await q(MSGS)}`);
   const state = JSON.parse(await q(`JSON.stringify({
     native: document.querySelectorAll('.msg img.emote[src*="/emoticons/v2/"]').length,
-    thirdParty: document.querySelectorAll('.msg img.emote:not([src*="/emoticons/v2/"])').length,
+    thirdParty: document.querySelectorAll('.msg img.emote:not([src*="/emoticons/v2/"]):not([src*="/yt-emotes/"])').length,
+    ytEmotes: document.querySelectorAll('.msg img.emote[src*="/yt-emotes/"]').length,
+    ytBadgeArt: document.querySelectorAll('.msg img.badge-img[src*="/yt-badges/"]').length,
     twitchBadges: document.querySelectorAll('.msg img.badge-img[src*="/twitch-badges/"]').length,
     ggBadges: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/files/icons/"]').length,
     chips: document.querySelectorAll('.msg .badge').length,
@@ -331,6 +397,13 @@ async function scenarioDegraded() {
   check('twitch badge artwork is absent', state.twitchBadges === 0, `twitchBadges=${state.twitchBadges}`);
   check('goodgame icons survive — they need no catalogue either',
     state.ggBadges > 0, `ggBadges=${state.ggBadges}`);
+  // YouTube has no catalogue at all: every emote and membership badge arrives
+  // with its artwork url on the message, so an outage of every provider costs
+  // it nothing. This is the assertion that would fail first if a catalogue
+  // lookup were ever introduced there.
+  check('youtube is untouched — it has no catalogue to lose',
+    state.ytEmotes > 0 && state.ytBadgeArt > 0,
+    `ytEmotes=${state.ytEmotes} ytBadgeArt=${state.ytBadgeArt}`);
   // Which is the point of keeping the text chips as a fallback.
   check('twitch badges degrade to text chips', state.chips > 0, `chips=${state.chips}`);
   check('no broken images left on screen', state.broken === 0, `broken=${state.broken}`);
@@ -350,6 +423,8 @@ app.whenReady().then(async () => {
   if (SCENARIO) {
     if (SCENARIO === 'drop') await scenarioDrop();
     else if (SCENARIO === 'stall') await scenarioStall();
+    else if (SCENARIO === 'yt-offline') await scenarioYtOffline();
+    else if (SCENARIO === 'yt-ended') await scenarioYtEnded();
     else if (SCENARIO === 'staged') await scenarioStaged();
     else if (SCENARIO === 'trials') await scenarioTrials();
     else await scenarioDegraded();
@@ -372,6 +447,12 @@ app.whenReady().then(async () => {
     chat: document.querySelectorAll('.msg[data-platform]').length,
     tw: document.querySelectorAll('.msg img.plat-img[alt="twitch"]').length,
     gg: document.querySelectorAll('.msg img.plat-img[alt="goodgame"]').length,
+    yt: document.querySelectorAll('.msg img.plat-img[alt="youtube"]').length,
+    ytEmotes: document.querySelectorAll('.msg img.emote[src*="/yt-emotes/"]').length,
+    ytCustomEmotes: document.querySelectorAll('.msg img.emote[src*="/yt-emotes/_"]').length,
+    ytBadgeArt: document.querySelectorAll('.msg img.badge-img[src*="/yt-badges/"]').length,
+    ytChips: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .badge')).map(b => b.textContent),
+    ytNames: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).map(n => n.textContent),
     badges: document.querySelectorAll('.msg img.badge-img').length,
     ggIcons: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/chat-svg-icons/"]').length,
     emotes: document.querySelectorAll('.msg img.emote').length,
@@ -392,7 +473,8 @@ app.whenReady().then(async () => {
   })`));
 
   console.log('\nrendered:', JSON.stringify({
-    msgs: state.msgs, tw: state.tw, gg: state.gg, badges: state.badges, ggIcons: state.ggIcons,
+    msgs: state.msgs, tw: state.tw, gg: state.gg, yt: state.yt, badges: state.badges, ggIcons: state.ggIcons,
+    ytEmotes: state.ytEmotes,
     emotes: state.emotes, distinctEmotes: state.emoteNames.length, native: state.nativeEmotes,
   }));
 
@@ -401,8 +483,9 @@ app.whenReady().then(async () => {
   }
 
   if (!ONLY) {
-    check('both platforms rendered', state.tw > 0 && state.gg > 0, `tw=${state.tw} gg=${state.gg}`);
-    check('every scripted message arrived', state.msgs >= 25, `msgs=${state.msgs}`);
+    check('all three platforms rendered', state.tw > 0 && state.gg > 0 && state.yt > 0,
+      `tw=${state.tw} gg=${state.gg} yt=${state.yt}`);
+    check('every scripted message arrived', state.msgs >= 37, `msgs=${state.msgs}`);
     check('twitch badge artwork rendered', state.badges >= 3, `badges=${state.badges}`);
     check('goodgame icons rendered', state.ggIcons >= 3, `ggIcons=${state.ggIcons}`);
     check('emotes rendered', state.emotes >= 2, `emotes=${state.emotes}`);
@@ -418,15 +501,32 @@ app.whenReady().then(async () => {
     check('goodgame smiles use the high-resolution variant',
       state.ggEmotes > 0 && state.ggEmotes === state.ggBigEmotes,
       `gg=${state.ggEmotes} big=${state.ggBigEmotes}`);
+    // YouTube sends emote artwork on the message itself, so these arrive with
+    // no catalogue fetched at all — which is the one way it is simpler than
+    // either other platform, and worth proving rather than assuming.
+    check('youtube emoji rendered straight off the message', state.ytEmotes >= 8,
+      `ytEmotes=${state.ytEmotes}`);
+    check('a channel membership emoji rendered too', state.ytCustomEmotes >= 1,
+      `custom=${state.ytCustomEmotes}`);
+    check('youtube membership badge artwork rendered', state.ytBadgeArt >= 1,
+      `ytBadgeArt=${state.ytBadgeArt}`);
+    // YouTube publishes no artwork for the named roles, only the name.
+    check('youtube roles degrade to text chips', state.ytChips.includes('MOD') && state.ytChips.includes('HOST'),
+      JSON.stringify(state.ytChips));
+    check('youtube nickname present', state.ytNames.includes('@northwind_ada'),
+      JSON.stringify(state.ytNames));
+
     check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
     check('goodgame nickname present', state.names.includes('КотБаюн'));
     check('twitch nickname present', state.names.includes('pixel_wraith'));
     check('exact twitch colour kept', state.colors.includes('rgb(0, 0, 255)'),
       'expected the raw #0000FF a user picked');
-    check('both channels online', state.dots.length === 2 && state.dots.every((d) => /^src-dot online /.test(d)),
+    check('every channel online', state.dots.length === 3 && state.dots.every((d) => /^src-dot online /.test(d)),
       JSON.stringify(state.dots));
     check('the dot names the channel it stands for',
-      state.dots.some((d) => d.includes('tw/halcyon_tv')) && state.dots.some((d) => d.includes('gg/vetroduy')),
+      state.dots.some((d) => d.includes('tw/halcyon_tv'))
+      && state.dots.some((d) => d.includes('gg/vetroduy'))
+      && state.dots.some((d) => d.includes('yt/@northlight')),
       JSON.stringify(state.dots));
 
     // What each state is actually painted as, measured on a dot the app made
@@ -526,7 +626,7 @@ app.whenReady().then(async () => {
   check('each dot is paired with its own channel name',
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map(
       (p) => [!!p.querySelector('.src-dot'), p.querySelector('.src-name').textContent]))`)
-      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy']]),
+      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy'], [true, 'yt/@northlight']]),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map((p) => p.textContent))`));
   // The bar is a drag region. If hovering resizes anything in it, Chromium
   // recomputes that region, which disturbs the pointer, which drops the hover,
@@ -617,7 +717,7 @@ app.whenReady().then(async () => {
       (id) => getComputedStyle(document.getElementById(id)).webkitAppRegion)
   })`));
   check('settings panel opens', settings.painted);
-  check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 2), `rows=${settings.rows}`);
+  check('settings lists the configured channels', settings.rows === (ONLY ? 1 : 3), `rows=${settings.rows}`);
   check('settings icon swaps to back arrow', settings.back === 'block');
   check('settings does not overflow sideways', settings.overflowX === 0, `overflow=${settings.overflowX}`);
   check('settings is split into collapsible groups', settings.groups >= 8, `groups=${settings.groups}`);

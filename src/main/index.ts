@@ -1,10 +1,11 @@
 import {
-  app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, net, screen, shell, Tray,
+  app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, net, screen, session, shell, Tray,
 } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { activeSources, defaultConfig, parseConfig } from './config.js';
-import { resolveEndpoints, rewriteApiUrl } from './endpoints.js';
+import { resolveEndpoints } from './endpoints.js';
+import { allowedUrl, consentCookies, requestHeaders } from './http.js';
 import type { Config, PayloadHandoff, ReleaseInfo } from './types.js';
 import { watchPointer } from './pointer.js';
 import { createUpdater } from './updater/index.js';
@@ -387,37 +388,49 @@ ipcMain.handle('shell:open', (_e, url: string) => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
 });
 
-/**
- * HTTP GET performed in the main process so the renderer never hits CORS.
- * Restricted to the emote/badge metadata hosts.
- */
-export const ALLOWED_HOSTS = new Set([
-  'goodgame.ru',
-  'api2.goodgame.ru',
-  'static.goodgame.ru',
-  '7tv.io',
-  'api.betterttv.net',
-  'api.frankerfacez.com',
-  'api.ivr.fi',
-]);
-
 ipcMain.handle('env:endpoints', () => resolveEndpoints(process.env));
 
+/**
+ * HTTP performed in the main process so the renderer never hits CORS and needs
+ * no relaxed web security. Every one of these goes through `allowedUrl`, which
+ * is the app's entire outbound surface — see src/main/http.ts.
+ */
+function request(url: string, accept: Record<string, string>) {
+  return {
+    url: allowedUrl(url, process.env['OVERLAY_TEST_API_BASE']),
+    headers: requestHeaders(url, accept),
+  };
+}
+
 ipcMain.handle('http:json', async (_e, url: string) => {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('bad url');
-  }
-  if (parsed.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsed.hostname)) {
-    throw new Error('host not allowed: ' + parsed.hostname);
-  }
-  // The allowlist is checked against the real host first, so the override can
-  // only ever redirect a request the app was already allowed to make.
-  url = rewriteApiUrl(url, process.env['OVERLAY_TEST_API_BASE']);
-  const res = await net.fetch(url, {
-    headers: { Accept: 'application/json', 'User-Agent': 'ChatOverlay/1.0' },
+  const req = request(url, { Accept: 'application/json' });
+  const res = await net.fetch(req.url, { headers: req.headers });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+});
+
+/**
+ * The same, for a page rather than an API: YouTube's chat continuation token is
+ * only available inside the HTML its own player loads.
+ */
+ipcMain.handle('http:text', async (_e, url: string) => {
+  const req = request(url, { Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' });
+  const res = await net.fetch(req.url, { headers: req.headers });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.text();
+});
+
+/**
+ * A JSON POST, because YouTube's chat endpoint is one. It carries no
+ * credentials of any kind — no cookie, no key, no account — which is what makes
+ * reading YouTube chat anonymous in the same way the two sockets are.
+ */
+ipcMain.handle('http:post', async (_e, url: string, body: unknown) => {
+  const req = request(url, { 'Content-Type': 'application/json', Accept: 'application/json' });
+  const res = await net.fetch(req.url, {
+    method: 'POST',
+    headers: req.headers,
+    body: JSON.stringify(body ?? {}),
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
@@ -436,6 +449,12 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   void app.whenReady().then(() => {
+    // Answers Google's consent banner once, so youtube.com serves pages rather
+    // than the interstitial. See CONSENT_COOKIE for why it cannot be a header.
+    for (const cookie of consentCookies(process.env['OVERLAY_TEST_API_BASE'])) {
+      void session.defaultSession.cookies.set(cookie)
+        .catch((err: Error) => console.error('consent cookie failed:', err.message));
+    }
     loadConfig();
     createWindow();
     createTray();

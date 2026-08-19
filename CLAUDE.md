@@ -33,8 +33,9 @@ not in git.
 | `src/boot/` | picks which app payload to run; `payload.ts` holds the rules |
 | `src/main/` | Electron: window, tray, hotkeys, IPC |
 | `src/main/config.ts` | config defaults, migrations, invariants |
+| `src/main/http.ts` | the host allowlist — the app's whole outbound surface |
 | `src/main/updater/` | release parsing, manifest safety, staging |
-| `src/renderer/sources/` | GoodGame + Twitch protocol clients |
+| `src/renderer/sources/` | GoodGame + Twitch + YouTube protocol clients |
 | `src/renderer/emotes/` | emote and badge catalogues, caching |
 | `src/renderer/view.ts` | what to show: filtering, formatting, status text |
 | `src/renderer/index.ts` | DOM wiring |
@@ -88,10 +89,12 @@ mtimes; it records the write order now.
 ### End-to-end — deterministic
 
 `test/e2e/` boots the real, unmodified app against a local server that speaks
-both chat protocols and serves fixed emote/badge/icon fixtures. **No network, no
+all three chat protocols — two sockets and, for YouTube, a stateful HTTP
+conversation that remembers where each caller's continuation token got to — and
+serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs seven scenarios in under a minute, because the happy path
+`npm run e2e` runs nine scenarios in a couple of minutes, because the happy path
 is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
@@ -102,7 +105,15 @@ is the one thing a real install rarely stays on:
 | `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
 | `--scenario=staged` | a downloaded payload in `payload-new` — boot must install it, run it, and clear the launch counter once the renderer reports in |
 | `--scenario=trials` | the same payload after three launches that never reported in — quarantined, moved aside, bundled one runs instead |
+| `--scenario=yt-offline` | a YouTube channel that is not live for the first six seconds — the state neither socket has. Nothing is broken, so it says so in the feed once, waits on its own slow cadence rather than a failure curve, and connects itself the moment a stream starts |
+| `--scenario=yt-ended` | a YouTube stream that ends mid-chat, while the channel page goes on advertising it for a few more seconds — the app must report the loss, decline to re-resolve it in a hot loop, and settle back to "not live" |
 | `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
+
+`drop` and `stall` run the two socket channels alone. They exist to test what a
+socket does when it dies without saying so, and the bar's "every channel is
+down" wording; a polling source that carried on regardless would only make it
+"two of three offline" and quietly retire the assertion that tells the two
+messages apart. YouTube has its own two scenarios instead.
 
 The last three stage a real payload into the profile and let `boot.js` decide,
 in a real Electron process. They are the only tests of the code that picks
@@ -181,6 +192,9 @@ Read-only and anonymous on both; the app never sees a password.
 | Twitch chat | `wss://irc-ws.chat.twitch.tv:443` — IRC with tags, anonymous `justinfan` nick |
 | Twitch emotes | inline `emotes` tag, plus 7TV / BetterTTV / FrankerFaceZ |
 | Twitch badges | IVR public mirror; artwork itself is on Twitch's own CDN |
+| YouTube live chat | `www.youtube.com/youtubei/v1/live_chat/get_live_chat` — **not** a socket; a JSON POST polled at the interval the server itself names. No key, no cookie, no account |
+| YouTube stream lookup | `youtube.com/<channel>/live`, then `youtube.com/live_chat?v=<id>` for the continuation token and client version |
+| YouTube emotes & badges | inline on the message — no catalogue, no lookup, no cache |
 
 HTTP goes through the main process against a host allowlist, so the renderer
 never needs relaxed web security. The renderer has no Node integration.
@@ -236,13 +250,39 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
 - **GoodGame chat icons are plain white SVGs** (`fill="white"`), so they are
   drawn as `<img>`. An earlier version assumed they were fill-less and drew
   them as CSS masks, which turned every badge into the same silhouette.
-- Chat is **read-only and anonymous** on both platforms. Do not add anything
-  that needs a login.
+- Chat is **read-only and anonymous** on every platform. Do not add anything
+  that needs a login. This is why YouTube is read through the endpoint its own
+  watch page polls and not through the YouTube Data API: the API needs a key the
+  user has to create in a Google Cloud console, and its default 10,000-unit
+  daily quota is spent by one channel left open for a day.
+- **A YouTube channel is not an address.** It is a stream, which starts, ends
+  and gets replaced — a 24/7 channel rolls one into the next, and the same
+  channel can have several live at once. So "not live" is an ordinary state
+  rather than a failure: it says so in the feed once, waits on `YT_NOT_LIVE_MS`
+  rather than on the connection backoff, and connects itself when a stream
+  starts. The page that answers "is it live" is over a megabyte, which is most
+  of why that cadence is minutes and not seconds.
+- **Never resolve a YouTube stream from the first `"videoId"` in the HTML.**
+  That is a recommendation shelf. Asked twice in a row for one channel it
+  returned two different ids, one of them a different channel's stream.
+  `currentVideoEndpoint.watchEndpoint.videoId` is the one the page is playing.
+- **Take YouTube's unfiltered "Live chat" continuation, never the "Top chat"
+  one the page opens on.** Top chat's own subtitle is "Some messages, such as
+  potential spam, may not be visible". An overlay that silently drops messages
+  looks exactly like one that works. Both titles arrive translated, so it is
+  chosen by position.
+- **Parse one YouTube renderer type and ignore every other action in silence.**
+  YouTube is mid-migration from `…Renderer` to `…ViewModel` names across
+  superchats and membership gifts. Switching exhaustively turns every type they
+  add into a chat that stops, instead of a message that does not appear.
 
 ## Things that will waste your time
 
 - **Twitch and GoodGame are often quiet.** A manual check that renders nothing
   usually means nobody is talking, not that you broke it. Use `npm run e2e`.
+- **Most YouTube channels are not live**, which the overlay reports as `not
+  live` rather than as an error. That is the feature working. `--scenario=yt-offline`
+  is the test; a real channel is not.
 - **`[hidden]` loses to any `display` rule.** Add
   `selector[hidden] { display: none !important }` when you style a container.
 - **`-webkit-app-region` is the source of most of this project's UI bugs.**
@@ -258,6 +298,19 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
      which disturbs the pointer, which drops the hover, which resizes it back —
      a flicker loop several times a second. Hover may repaint; it may not
      reflow. The e2e measures the bar cold and hovered to enforce it.
+- **Two YouTube gates answer with a 200 and the wrong page**, so a client that
+  meets either sees no error at all — only a channel that is mysteriously never
+  live. Both were found by running the real app against real YouTube; neither
+  is reachable from the unit tests, and both are now reproduced by the fake
+  server so they cannot come back:
+  1. **Google's cookie-consent interstitial**, served to any request without the
+     consent cookie *from inside the EU only* — a CI box elsewhere never sees
+     it. The cookie has to go in the session's jar, because Chromium treats
+     `Cookie` as a forbidden header and drops it from a `fetch()` silently.
+  2. **YouTube's live chat sniffs the User-Agent** and answers one it does not
+     recognise with a 1.4 KB "update your browser" stub. So YouTube gets no
+     `User-Agent` override and sees Electron's own Chrome one — which is not a
+     disguise, this really is Chromium.
 - **Twitch emote ranges are code-point indexed.** Use `Array.from(text)`; an
   emoji earlier in the line shifts UTF-16 offsets.
 - GoodGame's chat endpoint needs the **trailing slash** — without it, 301.

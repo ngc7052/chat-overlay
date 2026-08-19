@@ -4,7 +4,7 @@ import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage } from '../../src/renderer/sources/types.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  platformTag, barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -281,5 +281,22 @@ describe('messagesToRemove', () => {
 
   it('removes nothing for a request that targets nothing', () => {
     expect(messagesToRemove({}, rendered)).toEqual([]);
+  });
+});
+
+describe('platform artwork and tags', () => {
+  it('names the icon and the two-letter tag for each platform', () => {
+    expect(platformIconPath('twitch')).toBe('../assets/twitch.svg');
+    expect(platformIconPath('youtube')).toBe('../assets/youtube.svg');
+    expect(platformIconPath('goodgame')).toBe('../assets/goodgame.png');
+    expect(platformTag('twitch')).toBe('tw');
+    expect(platformTag('youtube')).toBe('yt');
+    expect(platformTag('goodgame')).toBe('gg');
+  });
+
+  /** A config file is hand-editable, so a platform nobody has heard of can arrive. */
+  it('falls back rather than rendering a blank marker', () => {
+    expect(platformIconPath('mystery')).toBe('../assets/goodgame.png');
+    expect(platformTag('mystery')).toBe('gg');
   });
 });

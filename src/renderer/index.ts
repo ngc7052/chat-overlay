@@ -2,12 +2,13 @@ import type { Config, SourceConfig } from '../main/types.js';
 import { createAssetApi } from './emotes/index.js';
 import { GoodGameSource } from './sources/goodgame.js';
 import { TwitchSource } from './sources/twitch.js';
+import { YouTubeSource } from './sources/youtube.js';
 import type { BaseSource } from './sources/base.js';
 import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/types.js';
 import { debounce, timeString, type MessagePart } from './util.js';
 import {
   appearanceVars, badgeRendering, barAlert, emptyHint, messagesToRemove, platformIconPath,
-  platformMarker, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  platformMarker, platformTag, shouldDrop, sourceDotClass, statusDots, visibleBadges,
   type BarAlert, type SourceStatus,
 } from './view.js';
 
@@ -21,6 +22,8 @@ interface OverlayApi {
   quit(): Promise<void>;
   openExternal(url: string): Promise<void>;
   httpJson(url: string): Promise<unknown>;
+  httpText(url: string): Promise<string>;
+  httpPost(url: string, body: unknown): Promise<unknown>;
   endpoints(): Promise<{
     twitchWs: string | null; goodgameWs: string | null;
     ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
@@ -219,8 +222,9 @@ function addMessage(msg: ChatMessage): void {
     el.appendChild(img);
   } else if (marker === 'text') {
     const tag = document.createElement('span');
-    tag.className = 'plat ' + (msg.platform === 'twitch' ? 'tw' : 'gg');
-    tag.textContent = msg.platform === 'twitch' ? 'TW' : 'GG';
+    const short = platformTag(msg.platform);
+    tag.className = 'plat ' + short;
+    tag.textContent = short.toUpperCase();
     tag.title = msg.platform + ' / ' + msg.channel;
     el.appendChild(tag);
   }
@@ -404,9 +408,15 @@ function rebuildSources(): void {
       getConfig,
       assets,
       httpJson: (url: string) => overlay.httpJson(url),
+      httpText: (url: string) => overlay.httpText(url),
+      httpPost: (url: string, body: unknown) => overlay.httpPost(url, body),
       onWarn: (m: string) => console.warn(m),
     };
-    const src = cfgSrc.platform === 'twitch' ? new TwitchSource(opts) : new GoodGameSource(opts);
+    const src = cfgSrc.platform === 'twitch'
+      ? new TwitchSource(opts)
+      : cfgSrc.platform === 'youtube'
+        ? new YouTubeSource(opts)
+        : new GoodGameSource(opts);
     sources.push(src);
     states.set(src.key, { state: 'connecting', detail: '' });
     void src.connect();
@@ -575,7 +585,7 @@ function buildSourceRow(src: SourceConfig, index: number): HTMLElement {
   row.appendChild(enable);
 
   const select = document.createElement('select');
-  for (const [value, label] of [['goodgame', 'GoodGame'], ['twitch', 'Twitch']] as const) {
+  for (const [value, label] of [['goodgame', 'GoodGame'], ['twitch', 'Twitch'], ['youtube', 'YouTube']] as const) {
     const opt = document.createElement('option');
     opt.value = value;
     opt.textContent = label;

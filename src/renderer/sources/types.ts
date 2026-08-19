@@ -52,6 +52,19 @@ export interface HttpJson {
   (url: string): Promise<unknown>;
 }
 
+/**
+ * The two shapes YouTube needs that a JSON GET cannot cover: its continuation
+ * token is scraped out of an HTML page, and its chat endpoint is a POST.
+ * Both go through the main process against the same host allowlist.
+ */
+export interface HttpText {
+  (url: string): Promise<string>;
+}
+
+export interface HttpPost {
+  (url: string, body: unknown): Promise<unknown>;
+}
+
 export interface EmoteEntry { url: string; fallback?: string }
 export interface BadgeEntry { url: string; title: string }
 
@@ -77,6 +90,9 @@ export interface SourceOptions {
   getConfig(): { emotes: boolean; thirdPartyEmotes: boolean; exactColors: boolean };
   createSocket?: SocketFactory;
   httpJson?: HttpJson;
+  /** YouTube only; see HttpText / HttpPost. */
+  httpText?: HttpText;
+  httpPost?: HttpPost;
   assets?: AssetApi;
   /** Reported when a catalogue fails to load; the chat itself carries on. */
   onWarn?(message: string): void;

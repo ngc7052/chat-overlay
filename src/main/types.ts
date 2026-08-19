@@ -1,4 +1,4 @@
-export type PlatformName = 'goodgame' | 'twitch';
+export type PlatformName = 'goodgame' | 'twitch' | 'youtube';
 export type BadgeStyle = 'icons' | 'text' | 'off';
 export type PlatformStyle = 'icon' | 'text' | 'off';
 

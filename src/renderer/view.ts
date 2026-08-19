@@ -31,8 +31,23 @@ export function platformMarker(msg: ChatMessage, config: Config): 'icon' | 'text
   return config.platformStyle === 'icon' ? 'icon' : 'text';
 }
 
+const PLATFORM_ICONS: Record<string, string> = {
+  twitch: '../assets/twitch.svg',
+  youtube: '../assets/youtube.svg',
+  goodgame: '../assets/goodgame.png',
+};
+
 export function platformIconPath(platform: string): string {
-  return platform === 'twitch' ? '../assets/twitch.svg' : '../assets/goodgame.png';
+  return PLATFORM_ICONS[platform] ?? PLATFORM_ICONS['goodgame'] as string;
+}
+
+/** The two letters that stand in for a platform where a name will not fit. */
+const PLATFORM_TAGS: Record<string, string> = {
+  twitch: 'tw', goodgame: 'gg', youtube: 'yt',
+};
+
+export function platformTag(platform: string): string {
+  return PLATFORM_TAGS[platform] ?? 'gg';
 }
 
 /** Real artwork when the catalogue supplied it, a coloured text chip otherwise. */
@@ -84,7 +99,7 @@ export function statusDots(
 ): StatusDot[] {
   return sources.map((s) => {
     const st = states.get(s.key) ?? { state: 'connecting' as ConnectionState, detail: '' };
-    const label = `${s.platform === 'twitch' ? 'tw' : 'gg'}/${s.channel}`;
+    const label = `${platformTag(s.platform)}/${s.channel}`;
     const detail = st.detail && st.state !== 'online' ? ` — ${st.detail}` : '';
     return { key: s.key, label, state: st.state, title: `${label} — ${st.state}${detail}` };
   });

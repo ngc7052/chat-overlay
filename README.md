@@ -1,14 +1,14 @@
 # ChatOverlay
 
-Twitch and GoodGame chat, on top of your game. Transparent, click-through,
-read-only — no login, no tokens.
+Twitch, YouTube and GoodGame chat, on top of your game. Transparent,
+click-through, read-only — no login, no tokens.
 
 | Twitch | GoodGame |
 |---|---|
 | ![Twitch chat overlay](docs/media/demo-twitch.gif) | ![GoodGame chat overlay](docs/media/demo-goodgame.gif) |
 
 Locked, that is all there is: no window, no background, no scrollbar. Clicks go
-straight through to the game. Run both at once and they merge into one feed.
+straight through to the game. Run several at once and they merge into one feed.
 
 ## Install
 
@@ -26,8 +26,14 @@ Settings → **+ Add channel** → pick the platform, type the name, tick it.
 |---|---|
 | `twitch.tv/`**`somechannel`** | `somechannel` |
 | `goodgame.ru/`**`somechannel`** | `somechannel` |
+| `youtube.com/`**`@somechannel`** | `@somechannel` |
 
 Saved instantly, restored next launch.
+
+YouTube chat belongs to a stream rather than to a channel, so a YouTube row
+connects while that channel is live and keeps checking while it is not — it
+picks the stream up on its own when one starts, and says so in the feed
+meanwhile. To pin one particular stream instead, paste its link.
 
 ## Controls
 
@@ -47,9 +53,10 @@ Locked, it vanishes again.
 
 ## What you get
 
-- **Emotes** — Twitch native, 7TV, BetterTTV, FrankerFaceZ, and GoodGame smiles.
-- **Badges** — real Twitch artwork (mod, VIP, founder, sub tiers, bits) and
-  GoodGame's own chat icons.
+- **Emotes** — Twitch native, 7TV, BetterTTV, FrankerFaceZ, GoodGame smiles,
+  and YouTube's emoji and channel membership emoji.
+- **Badges** — real Twitch artwork (mod, VIP, founder, sub tiers, bits),
+  GoodGame's own chat icons, and YouTube membership badges.
 - **Nickname colours** exactly as the site shows them, or lifted for contrast
   over a bright game.
 - **Any font** installed on your machine, any size.
@@ -101,4 +108,5 @@ Contributing: [CLAUDE.md](CLAUDE.md). History: [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
-MIT. Twitch and GoodGame names, logos and badge artwork belong to their owners.
+MIT. Twitch, YouTube and GoodGame names, logos and badge artwork belong to
+their owners.

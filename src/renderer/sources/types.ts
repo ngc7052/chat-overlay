@@ -80,6 +80,13 @@ export interface SourceOptions {
   assets?: AssetApi;
   /** Reported when a catalogue fails to load; the chat itself carries on. */
   onWarn?(message: string): void;
+  /**
+   * Collapses both liveness-watchdog waits — how long a silent socket is left
+   * alone, and how long its probe is given to be answered — to this one value.
+   * Only the end-to-end harness sets it, so a stall scenario finishes in
+   * seconds instead of minutes.
+   */
+  watchdogMs?: number | null;
   /** Injected so retry timing is deterministic in tests. */
   setTimeoutFn?: (fn: () => void, ms: number) => unknown;
   clearTimeoutFn?: (handle: unknown) => void;

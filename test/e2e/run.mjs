@@ -5,6 +5,7 @@
  *   node test/e2e/run.mjs                     assert only
  *   node test/e2e/run.mjs --media             also write docs/media/*.png
  *   node test/e2e/run.mjs --scenario=drop     kill the sockets, expect recovery
+ *   node test/e2e/run.mjs --scenario=stall    hold them open and go silent
  *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
  *   node test/e2e/run.mjs --scenario=staged   a downloaded payload must be run
  *   node test/e2e/run.mjs --scenario=trials   one that never starts is dropped
@@ -44,10 +45,11 @@ await new Promise((resolve, reject) => {
 });
 
 const server = await startFakeChat({
-  loop: wantMedia || scenario === 'drop',
+  loop: wantMedia || scenario === 'drop' || scenario === 'stall',
   only,
   // Mid-transcript, so there is traffic before and after the break.
   dropAfterMs: scenario === 'drop' ? 4000 : 0,
+  stallAfterMs: scenario === 'stall' ? 4000 : 0,
   failCatalogues: scenario === 'degraded',
 });
 // Outside the repo on purpose. A real install keeps its payload under
@@ -116,6 +118,10 @@ const child = spawn(process.execPath, [electron, '--no-sandbox', driver], {
     OVERLAY_E2E_PREFIX: only ? only + '-' : '',
     OVERLAY_E2E_ONLY: only ?? '',
     OVERLAY_E2E_SCENARIO: scenario,
+    // Four minutes of patience is right for a real install and impossible for a
+    // test run, so the stall scenario shrinks the watchdog to a couple of
+    // seconds. Every other run leaves it empty and gets the shipped numbers.
+    OVERLAY_TEST_WATCHDOG_MS: scenario === 'stall' ? '2500' : '',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],

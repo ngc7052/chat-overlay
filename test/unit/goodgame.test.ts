@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  channelStatusUrl, ggBadges, ggChannelIconUrl, ggIconUrl, ggPlusIconUrl, GoodGameSource,
+  channelStatusUrl, GG_IDLE_MS, ggBadges, ggChannelIconUrl, ggIconUrl, ggPlusIconUrl,
+  GoodGameSource,
 } from '../../src/renderer/sources/goodgame.js';
 import type { ChatMessage, RemoveRequest, SocketLike, SourceOptions } from '../../src/renderer/sources/types.js';
 
@@ -268,6 +269,52 @@ describe('GoodGameSource.connect', () => {
     await h.source.connect();
     h.socket().onmessage?.({ data: 'not json' });
     expect(h.messages).toEqual([]);
+  });
+});
+
+/**
+ * GoodGame publishes no ping, and its WebSocket-level ones are answered by the
+ * browser without ever reaching onmessage — so nothing here would notice a
+ * connection that stayed open and stopped carrying anything.
+ */
+describe('GoodGameSource liveness watchdog', () => {
+  async function running(over: Partial<SourceOptions> = {}) {
+    const timers: { fn: () => void; ms: number }[] = [];
+    const h = harness({
+      setTimeoutFn: (fn, ms) => { timers.push({ fn: fn as () => void, ms }); return timers.length - 1; },
+      ...over,
+    });
+    await h.source.connect();
+    h.socket().onopen?.();
+    h.socket().sent.length = 0;
+    return { ...h, timers, fire: () => { const t = timers[timers.length - 1]!; t.fn(); return t.ms; } };
+  }
+
+  it('waits a minute of silence, then asks something the server answers', async () => {
+    // Their counters broadcast lands every twenty seconds on a channel where
+    // nobody is talking, so a minute is three of those missed in a row.
+    const h = await running();
+    expect(h.fire()).toBe(GG_IDLE_MS);
+    expect(h.socket().sent.map((f) => JSON.parse(f))).toEqual([{ type: 'ping', data: {} }]);
+  });
+
+  it('gives up on the socket when even that goes unanswered', async () => {
+    const h = await running();
+    h.fire();
+    h.fire();
+    expect(h.statuses.map((s) => s.state)).toContain('offline');
+    expect(h.messages.at(-1)?.kind).toBe('system');
+  });
+
+  it('counts a frame it cannot even parse as the socket working', async () => {
+    // An unknown command comes back as an error frame, and a future protocol
+    // could send anything at all. Whatever it says, it crossed the wire.
+    const h = await running();
+    h.fire();                                        // asks
+    h.socket().onmessage?.({ data: 'not json' });    // something came back
+    h.fire();                                        // so it asks again
+    expect(h.socket().sent).toHaveLength(2);
+    expect(h.statuses.map((s) => s.state)).not.toContain('offline');
   });
 });
 

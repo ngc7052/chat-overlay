@@ -188,7 +188,7 @@ const CONTENT_TYPES = {
 
 export async function startFakeChat({
   port = 0, script = SCRIPT, loop = false, only = null,
-  dropAfterMs = 0, failCatalogues = false,
+  dropAfterMs = 0, stallAfterMs = 0, failCatalogues = false,
 } = {}) {
   if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
@@ -255,6 +255,7 @@ export async function startFakeChat({
   };
 
   const dropped = new Set();
+  const stalled = new Set();
   wss.on('connection', (ws, req) => {
     const isGoodGame = (req.url || '').includes('chat2');
     const platform = isGoodGame ? 'goodgame' : 'twitch';
@@ -265,8 +266,19 @@ export async function startFakeChat({
       dropped.add(platform);
       later(() => ws.terminate(), dropAfterMs);
     }
-    if (isGoodGame) return runGoodGame(ws);
-    return runTwitch(ws);
+    // The harder case: the socket stays open and simply stops carrying
+    // anything, in both directions. No close frame is ever sent, so onclose
+    // never fires and the transport still looks perfectly healthy — a laptop
+    // waking from sleep, a Wi-Fi handover, a NAT timeout. Nothing but the
+    // client's own watchdog can tell this apart from a channel gone quiet.
+    let mute = false;
+    if (stallAfterMs && !stalled.has(platform)) {
+      stalled.add(platform);
+      later(() => { mute = true; }, stallAfterMs);
+    }
+    const send = (data) => { if (!mute) ws.send(data); };
+    if (isGoodGame) return runGoodGame(ws, send);
+    return runTwitch(ws, send);
   });
 
   function replay(send) {
@@ -280,48 +292,54 @@ export async function startFakeChat({
     }
   }
 
-  function runTwitch(ws) {
+  function runTwitch(ws, send) {
     let channel = 'channel';
     ws.on('message', (raw) => {
       for (const line of String(raw).split('\r\n')) {
         if (line.startsWith('NICK')) {
-          ws.send(':tmi.twitch.tv CAP * ACK :twitch.tv/tags twitch.tv/commands\r\n');
-          ws.send(':tmi.twitch.tv 001 justinfan1 :Welcome, GLHF!\r\n');
+          send(':tmi.twitch.tv CAP * ACK :twitch.tv/tags twitch.tv/commands\r\n');
+          send(':tmi.twitch.tv 001 justinfan1 :Welcome, GLHF!\r\n');
         }
         if (line.startsWith('JOIN')) {
           channel = line.split('#')[1] || 'channel';
-          ws.send(`@emote-only=0;room-id=71092938 :tmi.twitch.tv ROOMSTATE #${channel}\r\n`);
+          send(`@emote-only=0;room-id=71092938 :tmi.twitch.tv ROOMSTATE #${channel}\r\n`);
           replay((m) => {
             if (m.platform !== 'twitch') return;
             const id = 'msg-' + Math.random().toString(36).slice(2, 10);
             // Twitch's own emotes arrive as ranges on the tag; third-party ones
             // are matched by name from the catalogues, as in production.
             const emotes = twitchEmotesTag(m.text);
-            ws.send(
+            send(
               `@badge-info=;badges=${m.badges};color=${m.color};display-name=${m.user};` +
               `emotes=${emotes};id=${id};mod=0;room-id=71092938;subscriber=0;tmi-sent-ts=${Date.now()};` +
               `user-id=1;user-type= :${m.user.toLowerCase()}!u@u.tmi.twitch.tv PRIVMSG #${channel} :${m.text}\r\n`,
             );
           });
         }
-        if (line.startsWith('PING')) ws.send('PONG :tmi.twitch.tv\r\n');
+        // Twitch answers a client PING, which is what makes it usable as a
+        // liveness probe — and what a stalled connection stops doing.
+        if (line.startsWith('PING')) send('PONG :tmi.twitch.tv\r\n');
       }
     });
   }
 
-  function runGoodGame(ws) {
-    ws.send(JSON.stringify({ type: 'welcome', data: { protocolVersion: 2 } }));
+  function runGoodGame(ws, send) {
+    send(JSON.stringify({ type: 'welcome', data: { protocolVersion: 2 } }));
     ws.on('message', (raw) => {
       let frame;
       try { frame = JSON.parse(String(raw)); } catch { return; }
+      // Undocumented, but this is what the live server does — and it is the
+      // only app-level round trip GoodGame offers, since its WebSocket-level
+      // pings are answered by the browser and never reach the page.
+      if (frame.type === 'ping') return send(JSON.stringify({ type: 'pong', answer: 'pong' }));
       if (frame.type !== 'join') return;
-      ws.send(JSON.stringify({
+      send(JSON.stringify({
         type: 'success_join',
         data: { channel_id: channelId, channel_name: 'Fake stream', channel_key: 'fake' },
       }));
       replay((m) => {
         if (m.platform !== 'goodgame') return;
-        ws.send(JSON.stringify({
+        send(JSON.stringify({
           type: 'message',
           data: {
             channel_id: channelId,

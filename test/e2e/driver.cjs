@@ -25,6 +25,22 @@ if (process.argv.includes('--overlay-recovered')) {
   app.exit(0);
 }
 
+/**
+ * Links in the chat open in the real browser. A test run must not actually
+ * launch one, and the only thing worth asserting is that the right url was
+ * handed over — so the call is recorded here instead. This is the same
+ * electron module instance the app's main process requires, so the app's own
+ * `shell:open` handler ends up here.
+ */
+const { shell } = require('electron');
+const openedLinks = [];
+const realOpenExternal = shell.openExternal;
+shell.openExternal = (url) => { openedLinks.push(url); return Promise.resolve(); };
+if (shell.openExternal === realOpenExternal) {
+  console.log('E2E FAIL: could not intercept shell.openExternal');
+  app.exit(1);
+}
+
 require(path.join(__dirname, '..', '..', 'app', 'boot.js'));
 
 const failures = [];
@@ -132,6 +148,16 @@ const until = async (js, ms = 3000) => {
     await wait(50);
   }
 };
+/** until(), for state that lives in this process rather than in the page. */
+const untilLocal = async (fn, ms = 3000) => {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (fn()) return true;
+    if (Date.now() > deadline) return false;
+    await wait(50);
+  }
+};
+
 const snap = async (name) => {
   if (!MEDIA) return;
   // capturePage can hand back the frame before the last change was composited,
@@ -416,6 +442,36 @@ app.whenReady().then(async () => {
   check('the scrollbar and resize corner stay out of it',
     await q(`['scroll-guard', 'resize'].every((id) => getComputedStyle(document.getElementById(id)).webkitAppRegion === 'no-drag')`));
 
+  // A link is the one thing in the feed there is anything to do with. Someone
+  // posts a clip and there has to be a way to reach it that is not retyping it
+  // off the screen.
+  const link = JSON.parse(await q(`JSON.stringify((() => {
+    const el = document.querySelector('.msg .url');
+    const text = document.querySelector('.msg .text');
+    return {
+      painted: !!el && el.getClientRects().length > 0,
+      href: el ? el.textContent : '',
+      region: el ? getComputedStyle(el).webkitAppRegion : '',
+      textRegion: text ? getComputedStyle(text).webkitAppRegion : '',
+      cursor: el ? getComputedStyle(el).cursor : '',
+      select: el ? getComputedStyle(el).userSelect : ''
+    };
+  })())`));
+  check('a link is painted in the feed', link.painted);
+  // Drawing on top of a drag region does not mask it, so without a no-drag of
+  // its own the click would be read as the start of a window drag.
+  check('links opt out of the feed drag region', link.region === 'no-drag', link.region);
+  // And only the link does: dragging the window by the chat is a feature.
+  check('ordinary message text stays drag surface', link.textRegion !== 'no-drag', link.textRegion);
+  check('a link looks clickable', link.cursor === 'pointer', link.cursor);
+  // Selection is off globally; a link has to opt back in or it cannot even be
+  // copied.
+  check('a link can be selected and copied', link.select === 'text', link.select);
+  await q(`document.querySelector('.msg .url').click(); true`);
+  check('clicking a link hands it to the browser',
+    (await untilLocal(() => openedLinks.length > 0)) && openedLinks.length === 1 && openedLinks[0] === link.href,
+    `${JSON.stringify(openedLinks)} vs ${link.href}`);
+
   // Settings panel opens, closes, and swaps the cog for a back arrow.
   await q(`document.getElementById('btn-settings').click(); true`);
   const opened = await until(`document.getElementById('settings').getClientRects().length > 0`);
@@ -465,10 +521,113 @@ app.whenReady().then(async () => {
   await q(`document.getElementById('g-text').open = true; true`);
   check('expanding a group reveals its controls',
     await until(`document.getElementById('fontSize').getClientRects().length > 0`));
+
+  // "Overall opacity" is the chat's, not the window's. Set on <body> it faded
+  // the settings panel and the bar with it, so dragging the slider to its 0.2
+  // floor over a bright game left the control needed to drag it back at 20%
+  // over that same game.
+  const setOpacity = (v) => q(`(() => {
+    const slider = document.getElementById('opacity');
+    slider.value = '${v}';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await setOpacity('0.2');
+  const faded = JSON.parse(await q(`JSON.stringify((() => {
+    // What reaches the screen is the product down the whole ancestor chain,
+    // wherever the opacity happens to be set.
+    const effective = (el) => {
+      let o = 1;
+      for (let e = el; e; e = e.parentElement) o *= Number(getComputedStyle(e).opacity);
+      return o;
+    };
+    return {
+      chat: effective(document.getElementById('chat')),
+      settings: effective(document.getElementById('settings')),
+      slider: effective(document.getElementById('opacity')),
+      bar: effective(document.getElementById('bar')),
+      painted: document.getElementById('opacity').getClientRects().length > 0,
+      // Opacity makes a stacking context, so ask what is actually at the pixel
+      // rather than trusting the panel is still drawn over the faded feed.
+      onTop: (() => {
+        const el = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+        return !!el && document.getElementById('settings').contains(el);
+      })()
+    };
+  })())`));
+  check('the feed fades with the opacity setting', Math.abs(faded.chat - 0.2) < 0.001, faded.chat);
+  check('the settings panel stays opaque at the opacity floor', faded.settings === 1, faded.settings);
+  check('so does the slider that undoes it', faded.slider === 1 && faded.painted, faded.slider);
+  check('and so does the bar', faded.bar === 1, faded.bar);
+  check('the panel is still what is drawn over the faded feed', faded.onTop);
+  await setOpacity('1');
+
+  // The lock button's tooltip names the hotkey that brings the overlay back —
+  // the one thing a user checks when they cannot. A tooltip is an attribute by
+  // nature; there is nothing painted to measure.
+  const rebind = (accel) => q(`(() => {
+    const input = document.getElementById('hotkeyLock');
+    input.value = '${accel}';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return document.getElementById('btn-lock').title;
+  })()`);
+  check('the lock tooltip names the configured hotkey',
+    (await q(`document.getElementById('btn-lock').title`)).includes('Control+Alt+O'),
+    await q(`document.getElementById('btn-lock').title`));
+  const rebound = await rebind('Control+Alt+K');
+  check('and follows the hotkey when it is rebound',
+    rebound.includes('Control+Alt+K') && !rebound.includes('Control+Alt+O'), rebound);
+  await rebind('Control+Alt+O');
+
   await q(`document.getElementById('g-text').open = false; true`);
 
   await q(`document.getElementById('btn-settings').click(); true`);
   check('settings panel closes',
+    await until(`document.getElementById('settings').getClientRects().length === 0`));
+
+  /*
+   * The update button in the state every user eventually reaches. Its icon is a
+   * child of the button, so writing the button's own textContent replaced it —
+   * and the run only ever asserted the button was hidden when there was no
+   * update, which is how it shipped as bare text.
+   */
+  const UPDATE_BUTTON = `JSON.stringify((() => {
+    const icon = document.querySelector('#btn-update svg');
+    const label = document.getElementById('update-label');
+    return {
+      button: document.getElementById('btn-update').getClientRects().length > 0,
+      icon: !!icon && icon.getClientRects().length > 0,
+      labelPainted: !!label && label.getClientRects().length > 0,
+      label: label ? label.textContent : null,
+      status: document.getElementById('update-status').textContent
+    };
+  })())`;
+  win.webContents.send('update:available', { version: '99.0.0', current: app.getVersion() });
+  check('an offered update raises the button',
+    await until(`document.getElementById('btn-update').getClientRects().length > 0`));
+  const offered = JSON.parse(await q(UPDATE_BUTTON));
+  check('the download icon is still painted alongside the offer', offered.icon, JSON.stringify(offered));
+  check('and the label says which version',
+    offered.labelPainted && offered.label === 'Update to 99.0.0', JSON.stringify(offered.label));
+
+  // Clicking it starts the download. Nothing is pending in the main process, so
+  // it fails at once — which is the path that writes the label twice more.
+  await q(`document.getElementById('btn-update').click(); true`);
+  check('a failed update says so',
+    await until(`/Update failed/.test(document.getElementById('update-status').textContent)`),
+    await q(`document.getElementById('update-status').textContent`));
+  const afterClick = JSON.parse(await q(UPDATE_BUTTON));
+  check('the icon survives downloading and failing', afterClick.button && afterClick.icon,
+    JSON.stringify(afterClick));
+  check('and the label goes back to the offer', afterClick.label === 'Update to 99.0.0',
+    JSON.stringify(afterClick.label));
+
+  win.webContents.send('update:none', { current: app.getVersion() });
+  check('withdrawing the offer hides the button again',
+    await until(`document.getElementById('btn-update').getClientRects().length === 0`));
+  // The click opened settings on its way past.
+  await q(`document.getElementById('btn-settings').click(); true`);
+  check('settings closes again',
     await until(`document.getElementById('settings').getClientRects().length === 0`));
 
   // Locked: no chrome, no backdrop, still showing messages.
@@ -482,6 +641,15 @@ app.whenReady().then(async () => {
   check('locked hides the bar', !locked.bar);
   check('locked has no backdrop', locked.bg === 'rgba(10, 12, 18, 0)', locked.bg);
   check('locked still shows messages', locked.msgs > 0);
+  // Locked, every click belongs to the game underneath — which is the whole
+  // point of the app. The window is click-through, so a real click never gets
+  // here at all; this drives the element directly to prove the app does not
+  // open links behind a game either.
+  const openedBeforeLock = openedLinks.length;
+  await q(`document.querySelector('.msg .url').click(); true`);
+  await wait(300);
+  check('locked, a link does not open — the click is the game\'s',
+    openedLinks.length === openedBeforeLock, JSON.stringify(openedLinks));
   await snap('overlay-locked.png');
 
   if (MEDIA) {

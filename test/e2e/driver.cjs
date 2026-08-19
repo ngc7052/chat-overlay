@@ -197,6 +197,41 @@ async function scenarioDrop() {
     `before=${before} after=${await q(MSGS)}`);
 }
 
+/**
+ * The case ws.onclose cannot see: the sockets stay open and simply stop
+ * carrying anything, in either direction. No close frame is sent, so nothing
+ * fires and the transport still looks healthy — a laptop waking from sleep, a
+ * Wi-Fi handover, a NAT timeout. Only the sources' own watchdog can tell this
+ * apart from a channel where nobody happens to be talking, which is the normal
+ * state of most channels and why it has to ask before it gives up.
+ */
+async function scenarioStall() {
+  check('connected before the stall', await until(`${DOTS}.includes('online')`, 15000));
+  const before = Number(await q(MSGS));
+  check('messages arriving before the stall', before > 0, `msgs=${before}`);
+
+  // The server goes silent 4s in and stops answering probes, without closing.
+  check('the silence is noticed, not sat on',
+    await until(`!JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 25000),
+    await q(DOTS));
+  check('the feed says why, so it is not mistaken for a quiet channel',
+    await until(`/no reply/.test(document.body.textContent)`, 25000),
+    await q(`document.body.textContent.slice(-200)`));
+  check('the status says it is retrying',
+    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /retry|connecting|error/.test(d.title))`, 15000),
+    await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
+
+  // Counted after the silence was noticed, not before it: everything that
+  // arrives from here can only have come over a socket that was reconnected.
+  const atStall = Number(await q(MSGS));
+  check('it reconnects on its own',
+    await until(`JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 40000),
+    await q(DOTS));
+  check('the feed carries on after reconnecting',
+    await until(`${MSGS} > ${atStall}`, 30000),
+    `atStall=${atStall} after=${await q(MSGS)}`);
+}
+
 const stateFile = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(PROFILE, 'payload-state.json'), 'utf8'));
@@ -296,6 +331,7 @@ app.whenReady().then(async () => {
 
   if (SCENARIO) {
     if (SCENARIO === 'drop') await scenarioDrop();
+    else if (SCENARIO === 'stall') await scenarioStall();
     else if (SCENARIO === 'staged') await scenarioStaged();
     else if (SCENARIO === 'trials') await scenarioTrials();
     else await scenarioDegraded();

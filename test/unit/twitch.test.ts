@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildBadges, TwitchSource, twitchEmoteUrl } from '../../src/renderer/sources/twitch.js';
+import {
+  buildBadges, KEEPALIVE_MS, TwitchSource, twitchEmoteUrl,
+} from '../../src/renderer/sources/twitch.js';
 import type { ChatMessage, RemoveRequest, SocketLike, SourceOptions } from '../../src/renderer/sources/types.js';
 
 /** A socket that records what was sent and lets the test drive the callbacks. */
@@ -11,7 +13,12 @@ class FakeSocket implements SocketLike {
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   onerror: ((ev?: unknown) => void) | null = null;
   onclose: ((ev?: unknown) => void) | null = null;
-  send(data: string) { this.sent.push(data); }
+  // A real WebSocket throws on send() unless it is OPEN, and the source has to
+  // survive that; a fake that quietly accepts anything hides the bug.
+  send(data: string) {
+    if (this.readyState !== 1) throw new Error('InvalidStateError');
+    this.sent.push(data);
+  }
   close() { this.closed = true; }
 }
 
@@ -145,31 +152,60 @@ describe('TwitchSource connection', () => {
     expect(raw.sent).toEqual([]);
   });
 
-  it('sends a keepalive PING when the timer fires', () => {
+  it('probes with a PING once the socket has gone quiet', () => {
     const h = harness();
     h.socket.onopen?.();
     h.socket.sent.length = 0;
-    const keepalive = h.timers[h.timers.length - 1];
-    keepalive?.fn();
+    h.timers.at(-1)?.fn();                                     // the idle watchdog
     expect(h.socket.sent).toEqual(['PING :overlay']);
   });
 
-  it('keeps sending keepalives, not just the first one', () => {
-    // The keepalive reschedules itself; if that arrow is never reached the
-    // connection goes quiet after one ping and Twitch drops it.
+  it('waits four minutes of silence before it asks anything', () => {
+    // Twitch's own server PINGs roughly every five minutes, so a shorter wait
+    // would probe channels that are simply quiet — which most channels are.
+    const h = harness();
+    h.socket.onopen?.();
+    expect(h.timers.at(-1)?.ms).toBe(KEEPALIVE_MS);
+  });
+
+  it('probes again the next time it goes quiet, not just once', () => {
+    // What re-arms it is the answer coming back. Without that the second firing
+    // would give up on the connection instead of asking again.
     const h = harness();
     h.socket.onopen?.();
     h.socket.sent.length = 0;
-    h.timers.at(-1)?.fn();          // first keepalive
-    h.timers.at(-1)?.fn();          // the one it scheduled
+    h.timers.at(-1)?.fn();                                     // asks
+    h.socket.onmessage?.({ data: 'PONG :tmi.twitch.tv\r\n' });  // and is answered
+    h.timers.at(-1)?.fn();                                     // quiet again
     expect(h.socket.sent).toEqual(['PING :overlay', 'PING :overlay']);
   });
 
-  it('does not throw a keepalive at a socket that is gone', () => {
+  it('does not throw a probe at a socket that is gone', () => {
     const h = harness();
     h.socket.onopen?.();
     (h.source as unknown as { ws: unknown }).ws = null;
     expect(() => h.timers.at(-1)?.fn()).not.toThrow();
+  });
+
+  it('does not throw a probe at a socket that is closing', () => {
+    // CLOSING is neither null nor usable: send() throws on it, and inside a
+    // timer callback that is an unhandled error rather than a dropped frame.
+    const h = harness();
+    h.socket.onopen?.();
+    h.socket.sent.length = 0;
+    h.socket.readyState = 2;
+    expect(() => h.timers.at(-1)?.fn()).not.toThrow();
+    expect(h.socket.sent).toEqual([]);
+  });
+
+  it('does not throw a PONG at a socket that is closing either', () => {
+    const h = harness();
+    h.socket.onopen?.();
+    const raw = h.socket;
+    raw.sent.length = 0;
+    raw.readyState = 2;
+    expect(() => raw.onmessage?.({ data: 'PING :tmi.twitch.tv\r\n' })).not.toThrow();
+    expect(raw.sent).toEqual([]);
   });
 
   it('retries with backoff after the socket closes', () => {

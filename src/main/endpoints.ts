@@ -1,5 +1,5 @@
 /**
- * Endpoint overrides, used only by the end-to-end harness.
+ * Test overrides, used only by the end-to-end harness.
  *
  * Tests that depend on whether someone happens to be streaming are not tests.
  * With these set, the app talks to a local fake server that speaks both chat
@@ -13,6 +13,12 @@ export interface Endpoints {
   ggIconBase: string | null;
   ggChannelIconBase: string | null;
   twitchEmoteBase: string | null;
+  /**
+   * Collapses the sources' liveness watchdog to this many milliseconds, so the
+   * stall scenario can watch a silent socket be noticed without sitting through
+   * the minutes a real install waits. Null everywhere else.
+   */
+  watchdogMs: number | null;
 }
 
 export interface EndpointEnv {
@@ -22,6 +28,7 @@ export interface EndpointEnv {
   OVERLAY_GG_ICON_BASE?: string | undefined;
   OVERLAY_GG_CHANNEL_ICON_BASE?: string | undefined;
   OVERLAY_TWITCH_EMOTE_BASE?: string | undefined;
+  OVERLAY_TEST_WATCHDOG_MS?: string | undefined;
 }
 
 export function resolveEndpoints(env: EndpointEnv): Endpoints {
@@ -31,6 +38,8 @@ export function resolveEndpoints(env: EndpointEnv): Endpoints {
     ggIconBase: env.OVERLAY_GG_ICON_BASE ?? null,
     ggChannelIconBase: env.OVERLAY_GG_CHANNEL_ICON_BASE ?? null,
     twitchEmoteBase: env.OVERLAY_TWITCH_EMOTE_BASE ?? null,
+    // Unset, empty and unparseable all mean "leave the watchdog alone".
+    watchdogMs: Number(env.OVERLAY_TEST_WATCHDOG_MS) || null,
   };
 }
 

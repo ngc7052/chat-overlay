@@ -91,13 +91,14 @@ mtimes; it records the write order now.
 both chat protocols and serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs six scenarios in about half a minute, because the happy path
+`npm run e2e` runs seven scenarios in under a minute, because the happy path
 is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
 |---|---|
 | default | messages, badges, emotes, colours, lock, settings, drag regions |
 | `--scenario=drop` | both sockets terminated mid-transcript with no close frame — the app must notice, back off, reconnect and carry on, with nobody pressing anything |
+| `--scenario=stall` | both sockets held open and simply muted, in both directions — no close frame ever comes, so only the liveness watchdog can tell this apart from a quiet channel. It has to probe, get nothing back, say so and reconnect. `OVERLAY_TEST_WATCHDOG_MS` shrinks the wait for the run; every other scenario gets the shipped minutes |
 | `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
 | `--scenario=staged` | a downloaded payload in `payload-new` — boot must install it, run it, and clear the launch counter once the renderer reports in |
 | `--scenario=trials` | the same payload after three launches that never reported in — quarantined, moved aside, bundled one runs instead |
@@ -118,7 +119,8 @@ element was plainly visible on screen.
 
 The app is pointed at the fake server with `OVERLAY_TWITCH_WS`,
 `OVERLAY_GOODGAME_WS`, `OVERLAY_TEST_API_BASE`, `OVERLAY_GG_ICON_BASE`,
-`OVERLAY_GG_CHANNEL_ICON_BASE` and `OVERLAY_TWITCH_EMOTE_BASE`. Real installs
+`OVERLAY_GG_CHANNEL_ICON_BASE` and `OVERLAY_TWITCH_EMOTE_BASE`, and its
+liveness watchdog is shortened with `OVERLAY_TEST_WATCHDOG_MS`. Real installs
 set none of these and behave exactly as before.
 
 The emote, badge and icon artwork is the platforms' own, vendored under
@@ -172,7 +174,7 @@ Read-only and anonymous on both; the app never sees a password.
 
 | | Endpoint |
 |---|---|
-| GoodGame chat | `wss://chat.goodgame.ru/chat2/` — JSON, joins by numeric id (**trailing slash required**) |
+| GoodGame chat | `wss://chat.goodgame.ru/chat2/` — JSON, joins by numeric id (**trailing slash required**); undocumented `{"type":"ping"}` is answered `pong`, and `channel_counters` is pushed every 20s |
 | GoodGame channel id | `goodgame.ru/api/getchannelstatus` |
 | GoodGame smiles | `goodgame.ru/api/4/smiles` |
 | GoodGame icons | `static.goodgame.ru/images/chat-svg-icons/` — white SVGs, no API, mapping read from their CSS |
@@ -217,6 +219,18 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   an interrupted download and discarded.
 - **An empty channel list is legitimate.** Never repopulate it with defaults —
   that resurrects channels the user deleted.
+- **The liveness watchdog asks before it gives up.** A quiet channel is the
+  normal state of most channels, so silence alone is never evidence of death:
+  the source sends something the server is known to answer, and only reconnects
+  when the answer never comes. Reconnecting a healthy socket would drop chat for
+  every user, which is worse than the bug the watchdog exists to catch. The
+  numbers are in `KEEPALIVE_MS`, `GG_IDLE_MS` and `PROBE_GRACE_MS`, each with
+  the measurement behind it written down beside it.
+- **Any inbound frame counts as life** — an error reply, a viewer count,
+  anything. Tracking a specific reply instead would break the moment either
+  platform changed a message type. Note that WebSocket-level pings do *not*
+  count: the browser answers those itself and they never reach `onmessage`,
+  which is why the probe has to be app-level on both platforms.
 - **A release without an `app-payload.json.gz` asset means "download the full
   zip".** That is correct when the Electron runtime itself changed.
 - **GoodGame chat icons are plain white SVGs** (`fill="white"`), so they are

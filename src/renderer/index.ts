@@ -23,6 +23,7 @@ interface OverlayApi {
   endpoints(): Promise<{
     twitchWs: string | null; goodgameWs: string | null;
     ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
+    watchdogMs: number | null;
   }>;
   updateVersion(): Promise<{ version: string; bundled: string | null; usingStaged: boolean }>;
   updateCheck(): Promise<{ error?: string; newer?: boolean; current?: string; version?: string }>;
@@ -72,7 +73,11 @@ let config: Config;
 let endpoints: {
   twitchWs: string | null; goodgameWs: string | null;
   ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
-} = { twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null };
+  watchdogMs: number | null;
+} = {
+  twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null,
+  twitchEmoteBase: null, watchdogMs: null,
+};
 let sources: BaseSource[] = [];
 const states = new Map<string, SourceStatus>();
 const nodes = new Map<string, { el: HTMLElement; timer: ReturnType<typeof setTimeout> | null }>();
@@ -356,6 +361,7 @@ function rebuildSources(): void {
       iconBase: endpoints.ggIconBase,
       channelIconBase: endpoints.ggChannelIconBase,
       emoteBase: endpoints.twitchEmoteBase,
+      watchdogMs: endpoints.watchdogMs,
       onMessage: addMessage,
       onRemove: handleRemove,
       onStatus: (src: { key: string }, state: ConnectionState, detail: string) => {

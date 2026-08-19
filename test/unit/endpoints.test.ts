@@ -13,6 +13,7 @@ describe('resolveEndpoints', () => {
       .toEqual({
         twitchWs: null, goodgameWs: null,
         ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
+        watchdogMs: null,
       });
   });
 
@@ -23,12 +24,14 @@ describe('resolveEndpoints', () => {
       OVERLAY_GG_ICON_BASE: 'http://127.0.0.1:1/gg-icons/',
       OVERLAY_GG_CHANNEL_ICON_BASE: 'http://127.0.0.1:1/files/icons/',
       OVERLAY_TWITCH_EMOTE_BASE: 'http://127.0.0.1:1/emoticons/v2/',
+      OVERLAY_TEST_WATCHDOG_MS: '2500',
     })).toEqual({
       twitchWs: 'ws://127.0.0.1:1/irc',
       goodgameWs: 'ws://127.0.0.1:1/chat2/',
       ggIconBase: 'http://127.0.0.1:1/gg-icons/',
       ggChannelIconBase: 'http://127.0.0.1:1/files/icons/',
       twitchEmoteBase: 'http://127.0.0.1:1/emoticons/v2/',
+      watchdogMs: 2500,
     });
   });
 
@@ -36,7 +39,16 @@ describe('resolveEndpoints', () => {
     expect(resolveEndpoints({ OVERLAY_TWITCH_WS: 'ws://x/1' })).toEqual({
       twitchWs: 'ws://x/1', goodgameWs: null,
       ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
+      watchdogMs: null,
     });
+  });
+
+  it('leaves the watchdog alone when the override is empty or nonsense', () => {
+    // A real install has none of these set at all; an empty string is what a
+    // harness that only fills the variable in for one scenario leaves behind.
+    expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: '' }).watchdogMs).toBeNull();
+    expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: 'soon' }).watchdogMs).toBeNull();
+    expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: '0' }).watchdogMs).toBeNull();
   });
 });
 

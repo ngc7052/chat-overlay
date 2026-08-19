@@ -12,6 +12,27 @@ import type { Badge, ChatMessage, SourceOptions } from './types.js';
  */
 export const GG_WS_URL = 'wss://chat.goodgame.ru/chat2/';
 
+/**
+ * How long the socket may go completely silent before it is worth asking
+ * whether anyone is still there.
+ *
+ * GoodGame pushes a `channel_counters` frame to everyone in a channel every
+ * twenty seconds — measured against the live server, on an idle channel — so a
+ * joined socket is never quiet for long, whatever the chat is doing. Sixty
+ * seconds is three of those broadcasts missed in a row.
+ *
+ * It also sends WebSocket-level pings, but the browser answers those by itself
+ * and they never reach onmessage, so they are no evidence at all that the
+ * connection still carries anything. The probe has to be app-level.
+ *
+ * Their published protocol documents no ping, and `get_channel_counters` is
+ * answered with "Unknown command" — but `{"type":"ping"}` really does come back
+ * as `{"type":"pong"}`. And should that ever stop being true, an unknown
+ * command is answered with an `error` frame, which is inbound traffic just the
+ * same: the watchdog would be satisfied rather than fooled.
+ */
+export const GG_IDLE_MS = 60000;
+
 export function channelStatusUrl(channel: string): string {
   return 'https://goodgame.ru/api/getchannelstatus?fmt=json&id=' + encodeURIComponent(channel);
 }
@@ -142,6 +163,7 @@ export function ggBadges(
 export class GoodGameSource extends BaseSource {
   readonly platform: PlatformName = 'goodgame';
   channelId: string | null = null;
+  protected readonly idleMs = GG_IDLE_MS;
   private readonly iconBase: string;
   private readonly channelIconBase: string;
 
@@ -195,9 +217,15 @@ export class GoodGameSource extends BaseSource {
         type: 'join',
         data: { channel_id: String(this.channelId), hidden: false },
       }));
+      // Start the liveness clock here rather than on the first frame: a server
+      // that accepts the socket and then never answers the join is exactly the
+      // case worth catching.
+      this.noteAlive();
     };
 
     ws.onmessage = (ev) => {
+      // Before the parse: a frame nobody can read still proves the socket works.
+      this.noteAlive();
       let msg: unknown;
       try { msg = JSON.parse(String(ev.data)); } catch { return; }
       this.handle(msg);
@@ -211,6 +239,11 @@ export class GoodGameSource extends BaseSource {
       this.status('offline');
       this.scheduleRetry();
     };
+  }
+
+  /** Undocumented, but answered: see GG_IDLE_MS for how that was established. */
+  protected probe(): void {
+    this.send(JSON.stringify({ type: 'ping', data: {} }));
   }
 
   handle(raw: unknown): void {

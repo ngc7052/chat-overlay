@@ -11,6 +11,18 @@ import type { Badge, ChatMessage, SourceOptions } from './types.js';
  * channel, which is why this app never asks for credentials.
  */
 export const TWITCH_WS_URL = 'wss://irc-ws.chat.twitch.tv:443';
+
+/**
+ * How long the socket may go completely silent before it is worth asking
+ * whether anyone is still there.
+ *
+ * Twitch's own server PINGs roughly every five minutes and this client answers
+ * PONG, so frames arrive on a channel where nobody is talking — four minutes of
+ * nothing at all is already longer than the gap the server itself keeps to. The
+ * probe sent at that point is the same `PING :overlay` this file has always
+ * sent; what is new is that an answer is expected, and that any inbound frame
+ * counts as one.
+ */
 export const KEEPALIVE_MS = 240000;
 
 export const TWITCH_BADGES: Record<string, { kind: string; label: string }> = {
@@ -63,7 +75,7 @@ export function buildBadges(
 export class TwitchSource extends BaseSource {
   readonly platform: PlatformName = 'twitch';
   roomId: string | null = null;
-  private keepalive: unknown = null;
+  protected readonly idleMs = KEEPALIVE_MS;
   private emoteBase: string;
 
   constructor(opts: SourceOptions) {
@@ -87,12 +99,14 @@ export class TwitchSource extends BaseSource {
       ws.send('PASS SCHMOOPIIE');
       ws.send('NICK ' + nick);
       ws.send('JOIN #' + this.channel);
-
-      this.clearTimeoutFn(this.keepalive);
-      this.keepalive = this.setTimeoutFn(() => this.ping(), KEEPALIVE_MS);
+      // Start the liveness clock here rather than on the first frame: a server
+      // that accepts the socket and then says nothing at all is exactly the
+      // case worth catching.
+      this.noteAlive();
     };
 
     ws.onmessage = (ev) => {
+      this.noteAlive();
       for (const line of String(ev.data).split('\r\n')) {
         if (line) this.handle(line);
       }
@@ -103,20 +117,14 @@ export class TwitchSource extends BaseSource {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      this.clearTimeoutFn(this.keepalive);
       this.status('offline');
       this.scheduleRetry();
     };
   }
 
-  private ping(): void {
-    if (this.ws) this.ws.send('PING :overlay');
-    this.keepalive = this.setTimeoutFn(() => this.ping(), KEEPALIVE_MS);
-  }
-
-  override destroy(): void {
-    this.clearTimeoutFn(this.keepalive);
-    super.destroy();
+  /** Twitch answers a client PING with a PONG, on any channel, immediately. */
+  protected probe(): void {
+    this.send('PING :overlay');
   }
 
   handle(line: string): void {
@@ -124,7 +132,7 @@ export class TwitchSource extends BaseSource {
 
     switch (command) {
       case 'PING':
-        if (this.ws) this.ws.send('PONG :' + (params[params.length - 1] ?? 'tmi.twitch.tv'));
+        this.send('PONG :' + (params[params.length - 1] ?? 'tmi.twitch.tv'));
         return;
 
       case 'RECONNECT':

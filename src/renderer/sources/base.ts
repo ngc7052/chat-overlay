@@ -3,9 +3,24 @@ import type {
   ChatMessage, ConnectionState, RemoveRequest, SocketFactory, SocketLike, SourceOptions,
 } from './types.js';
 
+/** WebSocket.OPEN. A socket in CLOSING is still non-null, and send() throws. */
+const OPEN = 1;
+
 /**
- * Shared connection handling: retry with backoff, status reporting, and the
- * system lines the feed shows when a channel connects or drops.
+ * How long a probe is given to be answered before the socket is called dead.
+ *
+ * Shared by both platforms because it asks about the network, not about either
+ * protocol: GoodGame answers its ping in well under a second and Twitch replies
+ * to PING immediately, so this is a couple of orders of magnitude of headroom.
+ * Erring long is deliberate — reconnecting a socket that was fine would drop
+ * chat for every user, which is worse than the silence this is here to catch.
+ */
+export const PROBE_GRACE_MS = 15000;
+
+/**
+ * Shared connection handling: retry with backoff, status reporting, the system
+ * lines the feed shows when a channel connects or drops, and the liveness
+ * watchdog that notices a connection nobody has closed.
  *
  * Timers, sockets and randomness are all injected so the reconnect behaviour can
  * be tested without waiting on real time or a real network.
@@ -18,6 +33,8 @@ export abstract class BaseSource {
   protected dead = false;
   protected attempt = 0;
   protected retryTimer: unknown = null;
+  protected watchdog: unknown = null;
+  private probing = false;
   emoteMap = new Map<string, { url: string; fallback?: string }>();
   badgeMap = new Map<string, { url: string; title: string }>();
 
@@ -34,6 +51,11 @@ export abstract class BaseSource {
   protected readonly assets: SourceOptions['assets'];
   protected readonly onWarn: (message: string) => void;
   protected readonly wsUrl: string | null;
+  /** Collapses both watchdog waits to one value; the e2e harness only. */
+  protected readonly watchdogMs: number | null;
+
+  /** How long this platform's socket may be silent before it is worth asking. */
+  protected abstract readonly idleMs: number;
 
   constructor(opts: SourceOptions) {
     this.channel = opts.channel;
@@ -51,6 +73,7 @@ export abstract class BaseSource {
     this.assets = opts.assets;
     this.onWarn = opts.onWarn ?? (() => {});
     this.wsUrl = opts.wsUrl ?? null;
+    this.watchdogMs = opts.watchdogMs ?? null;
   }
 
   get key(): string {
@@ -76,9 +99,78 @@ export abstract class BaseSource {
     });
   }
 
+  /**
+   * Send, but only at a socket that can take it.
+   *
+   * `this.ws` being non-null is not enough: a socket in CLOSING is still there
+   * and send() throws on it, which inside a timer callback is an unhandled
+   * error rather than a dropped frame.
+   */
+  protected send(data: string): void {
+    if (this.ws && this.ws.readyState === OPEN) this.ws.send(data);
+  }
+
+  /**
+   * A frame arrived, so the connection demonstrably still works — whatever the
+   * frame happened to say.
+   *
+   * Counting *anything* inbound is deliberately weaker than tracking a specific
+   * reply, and that is the point: an error frame, a viewer count or somebody
+   * saying hello all prove the same thing, so the watchdog cannot be fooled by
+   * a protocol detail changing underneath it.
+   */
+  protected noteAlive(): void {
+    this.probing = false;
+    this.armWatchdog(this.watchdogMs ?? this.idleMs);
+  }
+
+  private armWatchdog(ms: number): void {
+    this.clearTimeoutFn(this.watchdog);
+    this.watchdog = this.setTimeoutFn(() => this.watchdogFired(), ms);
+  }
+
+  protected clearWatchdog(): void {
+    this.clearTimeoutFn(this.watchdog);
+    this.watchdog = null;
+    this.probing = false;
+  }
+
+  /**
+   * Nothing has arrived for `idleMs`.
+   *
+   * That is not proof of death — a quiet channel is the normal state of most
+   * channels — so ask a question the server is known to answer, and only give
+   * up when the answer never comes. Without that second step this would drop a
+   * healthy connection every time a stream went quiet.
+   */
+  private watchdogFired(): void {
+    if (this.dead) return;
+    if (!this.probing) {
+      this.probing = true;
+      this.probe();
+      this.armWatchdog(this.watchdogMs ?? PROBE_GRACE_MS);
+      return;
+    }
+    // Open, but with nothing on the other end of it: a half-open connection
+    // after a sleep, a Wi-Fi handover or a NAT timeout, where no close frame is
+    // ever sent and onclose therefore never fires. Out through the same door
+    // every other disconnect uses.
+    this.status('offline', 'no reply — reconnecting');
+    this.system(`no reply — reconnecting ${this.platform}/${this.channel}`);
+    this.closeSocket();
+    this.scheduleRetry();
+  }
+
+  /** Something the server is known to answer, sent when the socket goes quiet. */
+  protected abstract probe(): void;
+
   /** Exponential backoff, capped, with jitter so many channels do not sync up. */
   protected scheduleRetry(): void {
     if (this.dead) return;
+    this.clearWatchdog();
+    // `attempt` is zeroed the moment a socket opens, so a watchdog firing after
+    // hours of a healthy session starts this curve from the bottom, not from
+    // the 30s cap a long outage would have climbed to.
     this.attempt += 1;
     const wait = Math.min(30000, 1000 * Math.pow(1.7, Math.min(this.attempt, 8)));
     const jitter = Math.round(wait * 0.25 * this.random());
@@ -89,6 +181,7 @@ export abstract class BaseSource {
   }
 
   protected closeSocket(): void {
+    this.clearWatchdog();
     if (!this.ws) return;
     const ws = this.ws;
     this.ws = null;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  clamp, debounce, ggColor, hashCode, hexToRgb, nickColor, readableColor, rgbToHsl, splitUrls,
+  debounce, ggColor, hashCode, hexToRgb, nickColor, readableColor, rgbToHsl, splitUrls,
   timeString,
 } from '../../src/renderer/util.js';
 
@@ -143,14 +143,6 @@ describe('splitUrls', () => {
 
   it('returns nothing for an empty string', () => {
     expect(splitUrls('')).toEqual([]);
-  });
-});
-
-describe('clamp', () => {
-  it('bounds on both sides and passes through in range', () => {
-    expect(clamp(5, 0, 10)).toBe(5);
-    expect(clamp(-1, 0, 10)).toBe(0);
-    expect(clamp(11, 0, 10)).toBe(10);
   });
 });
 

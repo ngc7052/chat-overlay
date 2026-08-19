@@ -17,7 +17,6 @@ export default defineConfig({
         'src/boot/index.ts',        // process-level bootstrap; e2e covers it
         'src/preload/index.ts',     // contextBridge surface, no logic
         'src/renderer/index.ts',    // DOM wiring
-        'src/renderer/dom.ts',      // DOM wiring
         'src/**/types.ts',
       ],
       thresholds: {

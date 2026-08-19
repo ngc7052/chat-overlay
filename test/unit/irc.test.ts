@@ -13,6 +13,19 @@ describe('unescapeTag', () => {
   it('leaves ordinary text alone', () => {
     expect(unescapeTag('plain')).toBe('plain');
   });
+
+  // One pass, not one replace per escape: unescaping \\ to \ and then looking
+  // for \s again eats the s that followed a literal backslash.
+  it('reads each escape once, so a literal backslash keeps the letter after it', () => {
+    expect(unescapeTag('\\\\s')).toBe('\\s');
+    expect(unescapeTag('\\\\')).toBe('\\');
+    expect(unescapeTag('a\\\\s\\sb')).toBe('a\\s b');
+  });
+
+  it('drops the backslash from an escape it does not know', () => {
+    expect(unescapeTag('a\\qb')).toBe('aqb');
+    expect(unescapeTag('trailing\\')).toBe('trailing');
+  });
 });
 
 describe('parseIrc', () => {

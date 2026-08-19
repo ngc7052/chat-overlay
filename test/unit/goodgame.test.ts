@@ -324,10 +324,12 @@ describe('GoodGameSource.handle', () => {
     expect(h.removals).toEqual([{ ids: ['goodgame:annieflowers:m1'] }]);
   });
 
-  it('removes a banned user by name', () => {
+  it('removes a banned user by name, in this channel only', () => {
     const h = connected();
     h.source.handle({ type: 'ban', data: { user_name: 'BadUser' } });
-    expect(h.removals).toEqual([{ platform: 'goodgame', user: 'baduser' }]);
+    expect(h.removals).toEqual([
+      { platform: 'goodgame', channel: 'annieflowers', user: 'baduser' },
+    ]);
     h.removals.length = 0;
     h.source.handle({ type: 'ban_user', data: {} });
     expect(h.removals).toEqual([]);

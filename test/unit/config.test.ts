@@ -82,6 +82,92 @@ describe('normaliseConfig', () => {
     expect(normaliseConfig({ ignoreList: 'bot' }).ignoreList).toEqual([]);
   });
 
+  describe('numeric ranges', () => {
+    // config.json is a documented file the README points at, so a hand edit —
+    // or a half-written file — is an ordinary thing to load, not an exotic one.
+    const corrupt = {
+      opacity: 0,
+      fontSize: -50,
+      maxMessages: 0,
+      emoteScale: 900,
+      fadeDuration: 'nope',
+      bgOpacity: 5,
+      locked: true,
+      sources: [{ platform: 'twitch', channel: 'x', enabled: true }],
+    };
+
+    it('leaves a config that is already in range exactly as it found it', () => {
+      const valid = {
+        fontSize: 24, fontWeight: 400, opacity: 0.8, bgOpacity: 0.4,
+        hoverBgOpacity: 0.6, emoteScale: 2.2, maxMessages: 250,
+        messageLifetime: 30, fadeDuration: 0.5,
+        bounds: { x: 100, y: 50, width: 600, height: 700 },
+      };
+      const c = normaliseConfig(valid);
+      for (const [key, value] of Object.entries(valid)) {
+        expect(c[key as keyof typeof valid]).toEqual(value);
+      }
+    });
+
+    it('never leaves a locked overlay invisible', () => {
+      // opacity 0 while locked is a window that is running, on top, invisible
+      // AND click-through — with no way to reach Settings and change it back.
+      const c = normaliseConfig(corrupt);
+      expect(c.locked).toBe(true);
+      expect(c.opacity).toBe(0.2);
+    });
+
+    it('pulls every out-of-range number back to its slider bounds', () => {
+      const c = normaliseConfig(corrupt);
+      expect(c.fontSize).toBe(9);        // min 9
+      expect(c.maxMessages).toBe(10);    // min 10, not 0 — 0 trims every arrival
+      expect(c.emoteScale).toBe(3);      // max 3
+      expect(c.bgOpacity).toBe(0.9);     // max 0.9
+    });
+
+    it('replaces a non-number with the default instead of passing it through', () => {
+      // fadeDuration reaches CSS as `--fade: <value>s`; a string makes "nopes".
+      expect(normaliseConfig(corrupt).fadeDuration).toBe(1.2);
+      expect(normaliseConfig({ fontSize: '30' }).fontSize).toBe(16);
+      expect(normaliseConfig({ opacity: null }).opacity).toBe(1);
+      expect(normaliseConfig({ maxMessages: NaN }).maxMessages).toBe(120);
+      expect(normaliseConfig({ emoteScale: Infinity }).emoteScale).toBe(1.7);
+      expect(normaliseConfig({ fontWeight: { big: true } }).fontWeight).toBe(600);
+    });
+
+    it('bounds the remaining settings too', () => {
+      expect(normaliseConfig({ fontSize: 999 }).fontSize).toBe(42);
+      expect(normaliseConfig({ fontWeight: 100 }).fontWeight).toBe(300);
+      expect(normaliseConfig({ fontWeight: 900 }).fontWeight).toBe(800);
+      expect(normaliseConfig({ opacity: 4 }).opacity).toBe(1);
+      expect(normaliseConfig({ bgOpacity: -1 }).bgOpacity).toBe(0);
+      expect(normaliseConfig({ hoverBgOpacity: -1 }).hoverBgOpacity).toBe(0);
+      expect(normaliseConfig({ hoverBgOpacity: 3 }).hoverBgOpacity).toBe(0.9);
+      expect(normaliseConfig({ emoteScale: 0 }).emoteScale).toBe(1);
+      expect(normaliseConfig({ maxMessages: 9999 }).maxMessages).toBe(400);
+      expect(normaliseConfig({ messageLifetime: -5 }).messageLifetime).toBe(0);
+      expect(normaliseConfig({ messageLifetime: 900 }).messageLifetime).toBe(120);
+      expect(normaliseConfig({ fadeDuration: -1 }).fadeDuration).toBe(0);
+      expect(normaliseConfig({ fadeDuration: 60 }).fadeDuration).toBe(10);
+    });
+
+    it('keeps the window openable whatever the bounds say', () => {
+      // A grabbable window at the resize floor, not a zero-sized one — and an
+      // unreadable coordinate means "wherever it opens", which is null.
+      expect(normaliseConfig({ bounds: { x: 'left', y: null, width: -8, height: 0 } }).bounds)
+        .toEqual({ x: null, y: null, width: 220, height: 120 });
+      expect(normaliseConfig({ bounds: { width: 'wide', height: null } }).bounds)
+        .toEqual({ x: null, y: null, width: 420, height: 620 });
+      expect(normaliseConfig({ bounds: 'nope' }).bounds)
+        .toEqual({ x: null, y: null, width: 420, height: 620 });
+    });
+
+    it('accepts negative window coordinates — a second display is to the left', () => {
+      expect(normaliseConfig({ bounds: { x: -1200, y: -40 } }).bounds)
+        .toMatchObject({ x: -1200, y: -40 });
+    });
+  });
+
   describe('migrations', () => {
     it('turns showBadges:false into badgeStyle off', () => {
       const c = normaliseConfig({ showBadges: false });

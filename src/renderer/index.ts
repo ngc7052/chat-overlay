@@ -6,8 +6,9 @@ import type { BaseSource } from './sources/base.js';
 import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/types.js';
 import { debounce, timeString, type MessagePart } from './util.js';
 import {
-  appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  shouldDrop, sourceDotClass, statusDots, visibleBadges, type SourceStatus,
+  appearanceVars, badgeRendering, barAlert, emptyHint, messagesToRemove, platformIconPath,
+  platformMarker, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  type BarAlert, type SourceStatus,
 } from './view.js';
 
 /** DOM wiring. The rules it applies live in ./view and ./sources. */
@@ -24,6 +25,7 @@ interface OverlayApi {
     twitchWs: string | null; goodgameWs: string | null;
     ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
     watchdogMs: number | null;
+    alertMs: number | null;
   }>;
   updateVersion(): Promise<{ version: string; bundled: string | null; usingStaged: boolean }>;
   updateCheck(): Promise<{ error?: string; newer?: boolean; current?: string; version?: string }>;
@@ -55,7 +57,9 @@ const overlay = window.overlay;
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 const chatEl = $('chat');
-const statusEl = $('status');
+const listEl = $('src-list');
+const alertEl = $('src-alert');
+const alertTextEl = $('alert-text');
 const settingsEl = $<HTMLDivElement>('settings');
 const sourcesEl = $('sources');
 const hotkeyWarn = $('hotkey-warn');
@@ -74,9 +78,10 @@ let endpoints: {
   twitchWs: string | null; goodgameWs: string | null;
   ggIconBase: string | null; ggChannelIconBase: string | null; twitchEmoteBase: string | null;
   watchdogMs: number | null;
+  alertMs: number | null;
 } = {
   twitchWs: null, goodgameWs: null, ggIconBase: null, ggChannelIconBase: null,
-  twitchEmoteBase: null, watchdogMs: null,
+  twitchEmoteBase: null, watchdogMs: null, alertMs: null,
 };
 let sources: BaseSource[] = [];
 const states = new Map<string, SourceStatus>();
@@ -320,29 +325,57 @@ function reconnectAll(): void {
   rebuildSources();
 }
 
+/**
+ * How long a connection may be down before the bar says so.
+ *
+ * Chat sockets drop and come back several times an evening; shouting about a
+ * blip that fixed itself in a second is exactly the noise this design exists
+ * to remove. Long enough to sit out an ordinary reconnect, short enough that a
+ * user who has noticed the silence and looked up has an answer waiting.
+ */
+const ALERT_GRACE_MS = 4000;
+
+let alertTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Paint the exception, once it has lasted long enough to be one. */
+function applyAlert(alert: BarAlert): void {
+  alertEl.title = alert.title;
+  alertTextEl.textContent = alert.text;
+  const showing = !alertEl.hidden;
+  const set = (): void => {
+    document.body.classList.toggle('status-warn', alert.level === 'warn');
+    document.body.classList.toggle('status-down', alert.level === 'down');
+    alertEl.hidden = alert.level === 'ok';
+  };
+  if (alertTimer) { clearTimeout(alertTimer); alertTimer = null; }
+  // Recovering is instant; only going wrong waits. And once the bar is already
+  // saying something, a change of what it says is not a fresh alarm.
+  if (alert.level === 'ok' || showing) { set(); return; }
+  alertTimer = setTimeout(set, endpoints.alertMs ?? ALERT_GRACE_MS);
+}
+
 function renderStatus(): void {
   const dots = statusDots(
     sources.map((s) => ({ key: s.key, platform: s.platform, channel: s.channel })),
     states,
   );
-  // Dots and names are two groups, not one pair each: the names live in a
-  // zero-width box and paint past its edge, so revealing them cannot move the
-  // dots or resize the bar. See style.css for why that matters.
-  const dotRow = document.createElement('span');
-  dotRow.className = 'src-dots';
-  const nameRow = document.createElement('span');
-  nameRow.className = 'src-names';
-  for (const d of dots) {
+  // One pair per channel — the dot sits immediately left of the name it stands
+  // for — plus the alert, which is the only thing painted at rest and is drawn
+  // over the row rather than in it. See style.css.
+  const list = dots.map((d) => {
+    const pair = document.createElement('span');
+    pair.className = 'src-pair';
     const dot = document.createElement('span');
     dot.className = 'src-dot ' + d.state;
     dot.title = d.title;
-    dotRow.append(dot);
     const name = document.createElement('span');
     name.className = 'src-name';
     name.textContent = d.label;
-    nameRow.append(name);
-  }
-  statusEl.replaceChildren(dotRow, nameRow);
+    pair.append(dot, name);
+    return pair;
+  });
+  listEl.replaceChildren(...list);
+  applyAlert(barAlert(dots));
   refreshSourceDots();
 }
 

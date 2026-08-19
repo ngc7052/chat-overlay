@@ -104,29 +104,56 @@ body:not(.locked).pointer-over #bar {
 body:not(.locked).pointer-over #drag-handle { opacity: .85; background: rgba(255, 255, 255, .1); }
 
 #status {
+  /* The alert is drawn over this box rather than in it, so it costs no
+     layout — see .src-alert. */
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 12px;
   min-width: 0;
-  overflow: visible;
+  overflow: hidden;
   white-space: nowrap;
   font-weight: 400;
   font-size: 11px;
   color: var(--ui-dim);
 }
 
-/* One dot per channel; its colour carries the state, its name fades in on
-   hover. Deliberately NOT no-drag: making the dots clickable stole drag
-   surface from the bar, right where the pointer arrives to grab the window.
-   Reconnect has its own button. */
-.src-dots {
-  flex: 0 0 auto;
+/*
+ * The per-channel readout: one dot immediately left of the name it stands for.
+ *
+ * Hidden at rest and revealed by the pointer being over the window — the same
+ * signal that fades the backdrop in. Hovering the bar itself is not usable:
+ * most of it is an app-region drag surface, which never delivers hover to the
+ * page.
+ *
+ * Only opacity moves. The pairs always occupy their space, so revealing them
+ * cannot resize the bar: the bar is a drag region, and a Chromium recompute of
+ * that region disturbs the pointer, which drops the hover, which resizes it
+ * back. Hover may repaint; it may not reflow. Reserving the space costs
+ * nothing here because at rest the whole row is invisible anyway — which is
+ * also why the dots no longer need packing together.
+ */
+.src-list {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 12px;
+  min-width: 0;
+  opacity: 0;
+  transition: opacity .15s ease;
+}
+body:not(.locked).pointer-over .src-list { opacity: 1; }
+
+.src-pair {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 .src-dot {
+  flex: 0 0 auto;
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -134,33 +161,59 @@ body:not(.locked).pointer-over #drag-handle { opacity: .85; background: rgba(255
   box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
 }
 .src-dot.online { background: #3fb950; }
-.src-dot.error { background: #f85149; }
 .src-dot.connecting { background: #d29922; }
+/* `offline` had no rule of its own and fell through to the grey above — the
+   same grey a channel that was never switched on is drawn in, so the one state
+   that means "this connection is gone" looked exactly like "this one was never
+   asked to connect". Grouped with `error` because they are the same news, and
+   the same red the alert uses when nothing is getting through. */
+.src-dot.error,
+.src-dot.offline { background: #f85149; }
+.src-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .9);
+}
 
 /*
- * The channel names, revealed by hovering the window — the same signal that
- * fades the backdrop in. Hovering the bar itself is not usable: most of it is
- * an app-region drag surface, which never delivers hover to the page.
+ * The exception, and the only thing the bar says at rest.
  *
- * Fading only, and from a zero-width box whose contents paint past its edge.
- * Nothing here may change layout: the bar is a drag region, so resizing it
- * makes Chromium recompute that region, which disturbs the pointer state,
- * which drops the hover, which resizes it back — an oscillation several times
- * a second that makes the bar unusable. Reserving the space instead would
- * spread the dots apart, which is what the zero width avoids.
+ * Absolutely positioned so that appearing and disappearing costs no layout at
+ * all — the drag region is never recomputed, whatever the connections do. It
+ * fades out under the pointer because the per-channel row that replaces it
+ * says strictly more.
  */
-.src-names {
-  flex: 0 0 auto;
-  width: 0;
-  margin-left: 5px;
+.src-alert {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
-  gap: 9px;
-  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
   opacity: 0;
   transition: opacity .15s ease;
+  color: #f0d6a8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .95);
 }
-.src-name { text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
-body:not(.locked).pointer-over .src-names { opacity: 1; }
+body.status-warn .src-alert,
+body.status-down .src-alert { opacity: 1; }
+/* `display: flex` above out-specifies the UA's `[hidden] { display: none }`,
+   so without this the alert would still be painted once it had been shown. */
+.src-alert[hidden] { display: none !important; }
+body:not(.locked).pointer-over .src-alert { opacity: 0; }
+.alert-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+  background: #d29922;
+}
+body.status-down .alert-dot { background: #f85149; }
+body.status-down .src-alert { color: #ffc9c4; }
+.alert-text { overflow: hidden; text-overflow: ellipsis; }
 
 #bar button {
   -webkit-app-region: no-drag;

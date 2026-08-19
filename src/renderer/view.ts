@@ -90,6 +90,40 @@ export function statusDots(
   });
 }
 
+export interface BarAlert {
+  /** ok — say nothing at all; warn — some chat still flowing; down — none is. */
+  level: 'ok' | 'warn' | 'down';
+  text: string;
+  title: string;
+}
+
+/**
+ * What the bar says at rest about the connections as a whole.
+ *
+ * The bar is chrome on an overlay, so the healthy answer is *nothing*: green
+ * dots are on screen every second of every session, carry no information the
+ * arriving messages do not already carry, and spend permanent pixels over a
+ * game to say "as expected". Only the exception is worth drawing, and drawing
+ * it only then makes its appearance — not its colour — the signal.
+ *
+ * Two failures, because they are two different problems. Some channels down
+ * while others still talk is easy to miss and rarely needs acting on; every
+ * channel down means the feed has stopped, which is exactly the question a
+ * user asks when chat goes quiet — "is nobody talking, or is this thing dead?"
+ * The count answers the first, the wording answers the second, and neither
+ * relies on telling amber from red over a bright game.
+ */
+export function barAlert(dots: StatusDot[]): BarAlert {
+  const title = dots.map((d) => d.title).join('\n');
+  const off = dots.filter((d) => d.state !== 'online');
+  // An empty channel list is legitimate — the hint in the chat body covers it.
+  if (dots.length === 0 || off.length === 0) return { level: 'ok', text: '', title };
+  if (off.length < dots.length) {
+    return { level: 'warn', text: `${off.length} of ${dots.length} offline`, title };
+  }
+  return { level: 'down', text: dots.length === 1 ? 'offline' : 'all channels offline', title };
+}
+
 /**
  * What to say when nothing is connected. "No channels yet" and "none enabled"
  * are different problems and lead the user to different buttons.

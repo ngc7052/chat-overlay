@@ -167,6 +167,9 @@ const snap = async (name) => {
   fs.writeFileSync(path.join(MEDIA, PREFIX + name), (await win.capturePage()).toPNG());
 };
 
+/** Painted, not merely styled: the alert is display:none when there is none. */
+const ALERT_PAINTED = `document.getElementById('src-alert').getClientRects().length > 0`;
+const ALERT_TEXT = `JSON.stringify(document.getElementById('alert-text').textContent)`;
 const DOTS = `JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.className))`;
 const MSGS = `document.querySelectorAll('.msg[data-platform]').length`;
 
@@ -189,12 +192,27 @@ async function scenarioDrop() {
     await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /retry|connecting|error/.test(d.title))`, 15000),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
 
+  check('the bar says so without being hovered',
+    await until(`${ALERT_PAINTED}`, 15000), await q(ALERT_TEXT));
+  // Locked, the bar is not there at all and the feed is the only surface left.
+  // A connection coming back has always written a line; one going away wrote
+  // nothing, so the feed's last word on a dead channel was "connected".
+  check('the feed says a working connection went away',
+    await until(`/lost — (twitch|goodgame)\\//.test(document.body.textContent)`, 15000),
+    await q(`document.body.textContent.slice(-200)`));
+  check('and says the feed has stopped, not that one channel has',
+    await until(`${ALERT_TEXT} === '"all channels offline"'`, 15000), await q(ALERT_TEXT));
+
   check('it reconnects on its own',
     await until(`JSON.parse(${DOTS}).every((c) => c.includes('online'))`, 40000),
     await q(DOTS));
   check('the feed carries on after reconnecting',
     await until(`${MSGS} > ${before}`, 30000),
     `before=${before} after=${await q(MSGS)}`);
+  // Recovering is instant — the bar goes quiet the moment there is nothing to
+  // report, without waiting out the grace it uses before complaining.
+  check('the bar goes quiet again once it is back',
+    await until(`!(${ALERT_PAINTED})`, 5000), await q(ALERT_TEXT));
 }
 
 /**
@@ -410,6 +428,35 @@ app.whenReady().then(async () => {
     check('the dot names the channel it stands for',
       state.dots.some((d) => d.includes('tw/halcyon_tv')) && state.dots.some((d) => d.includes('gg/vetroduy')),
       JSON.stringify(state.dots));
+
+    // What each state is actually painted as, measured on a dot the app made
+    // rather than read off a stylesheet. `offline` had no rule and fell through
+    // to the same grey a channel that was never switched on is drawn in.
+    //
+    // It is driven here rather than waited for because the app holds `offline`
+    // for a single tick: onclose reports it and scheduleRetry replaces it with
+    // `connecting` in the same task, so it never survives to a repaint. That is
+    // why the missing rule went unnoticed, and it is exactly why the colour has
+    // to be pinned by a test instead of by having been seen.
+    const colours = JSON.parse(await q(`(() => {
+      const dot = document.querySelector('#status .src-dot');
+      const was = dot.className;
+      const out = {};
+      for (const s of ['online', 'connecting', 'offline', 'error']) {
+        dot.className = 'src-dot ' + s;
+        out[s] = getComputedStyle(dot).backgroundColor;
+      }
+      // The bare class, which is what a dot with no state of its own gets.
+      dot.className = 'src-dot';
+      out.unconfigured = getComputedStyle(dot).backgroundColor;
+      dot.className = was;
+      return JSON.stringify(out);
+    })()`));
+    check('a connection that has gone is painted as trouble, not as grey',
+      colours.offline === 'rgb(248, 81, 73)', JSON.stringify(colours));
+    check('no state that means "not working" looks like one that was never switched on',
+      ['connecting', 'offline', 'error'].every((s) => colours[s] !== colours.unconfigured),
+      JSON.stringify(colours));
   } else {
     check(`${ONLY} messages rendered`, state.msgs >= 10, `msgs=${state.msgs}`);
   }
@@ -421,12 +468,33 @@ app.whenReady().then(async () => {
 
   // Backdrop: transparent unless unlocked and hovered.
   const BG = `getComputedStyle(document.getElementById('chat')).backgroundColor`;
-  const NAME_OPACITY = `getComputedStyle(document.querySelector('#status .src-names')).opacity`;
+  // The per-channel row as a whole: querying one `.src-name` throws when the
+  // channel list is empty, which is a legitimate configuration.
+  const NAME_OPACITY = `getComputedStyle(document.querySelector('#status .src-list')).opacity`;
+  // Everything the bar shows at rest, by whether it is painted at all. The
+  // healthy answer is "nothing": the dots and names are the hover readout and
+  // the alert is display:none until there is something to report.
+  // Both axes matter: getClientRects alone counts an element its parent has
+  // faded to nothing, and a computed opacity alone counts one that is
+  // display:none. Neither is on screen.
+  const STATUS_PAINTED = `JSON.stringify(Array.from(document.querySelectorAll('#status *'))
+    .filter((el) => {
+      if (el.getClientRects().length === 0) return false;
+      for (let n = el; n && n !== document.body; n = n.parentElement) {
+        if (Number(getComputedStyle(n).opacity) === 0) return false;
+      }
+      return true;
+    })
+    .map((el) => el.className))`;
   const BAR_BG = `getComputedStyle(document.getElementById('bar')).backgroundColor`;
   const BAR_SHADOW = `getComputedStyle(document.getElementById('bar')).boxShadow`;
-  const BAR_LAYOUT = `JSON.stringify(['bar', 'grip', 'status'].map((id) => {
-    const r = document.getElementById(id).getBoundingClientRect();
-    return [Math.round(r.width), Math.round(r.height)];
+  // Every element in the bar, not just the three flex-filled containers: those
+  // stretch to the bar whatever their children do, so measuring only them
+  // reports "no change" while a dot moves 80px inside them.
+  const BAR_LAYOUT = `JSON.stringify(Array.from(document.querySelectorAll('#bar, #bar *')).map((el) => {
+    const r = el.getBoundingClientRect();
+    return [el.id || String(el.className.baseVal ?? el.className) || el.tagName,
+            Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)];
   }))`;
   const placed = (ok, where) =>
     check(`the harness put the window ${where} the pointer`, ok,
@@ -436,6 +504,13 @@ app.whenReady().then(async () => {
   check('unlocked, not hovered: no backdrop', await until(`${BG} === 'rgba(10, 12, 18, 0)'`),
     await q(BG));
   check('not hovered: channel names are invisible', await until(`${NAME_OPACITY} === '0'`));
+  // With every channel connected the bar says nothing at all. A green light
+  // that is on in every session carries no information the arriving messages
+  // do not already carry, and it costs pixels over a game to say "as
+  // expected" — so the healthy state is drawn as silence, and the appearance
+  // of anything is itself the signal.
+  check('healthy and not hovered: the bar shows no status at all',
+    await until(`${STATUS_PAINTED} === '[]'`), await q(STATUS_PAINTED));
   // At rest the bar is not there at all: no strip, no seam, just the chat.
   check('not hovered: the bar is invisible',
     await until(`${BAR_BG} === 'rgba(0, 0, 0, 0)' && ${BAR_SHADOW} === 'none'`),
@@ -446,6 +521,13 @@ app.whenReady().then(async () => {
     await q(BG));
   // The same hover that fades the backdrop in also names each dot's channel.
   check('hovering reveals the channel names', await until(`${NAME_OPACITY} === '1'`));
+  // Each dot sits with the name it stands for, rather than in a row of
+  // anonymous dots with the names somewhere to their right.
+  check('each dot is paired with its own channel name',
+    await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map(
+      (p) => [!!p.querySelector('.src-dot'), p.querySelector('.src-name').textContent]))`)
+      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy']]),
+    await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map((p) => p.textContent))`));
   // The bar is a drag region. If hovering resizes anything in it, Chromium
   // recomputes that region, which disturbs the pointer, which drops the hover,
   // which resizes it back — a flicker loop several times a second that makes

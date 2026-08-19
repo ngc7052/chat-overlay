@@ -106,6 +106,37 @@ describe('reconnect backoff', () => {
     expect(h.timers.length).toBe(before);
   });
 
+  /**
+   * The line the feed was missing. A connection coming back has always said
+   * so; one going away said nothing, so the last word the feed had on a dead
+   * channel was "connected". Locked, the feed is the only surface there is.
+   */
+  it('says in the feed when a working connection goes away', () => {
+    const h = connected();
+    h.socket.onmessage?.({ data: ':tmi.twitch.tv 001 justinfan :Welcome\r\n' });
+    h.socket.onclose?.();
+    expect(h.messages.map(textOf)).toContain('lost — twitch/c');
+  });
+
+  it('stays quiet about a channel that never came up in the first place', () => {
+    // Retrying a channel that has never connected walks a backoff curve;
+    // announcing every attempt would bury the chat under a connection log.
+    const h = harness();
+    h.source.connect();
+    h.sockets[0]?.onclose?.();
+    expect(h.messages.map(textOf)).not.toContain('lost — twitch/c');
+    expect(h.statuses.map((s) => s.state)).toContain('offline');
+  });
+
+  it('does not repeat itself while a lost channel keeps failing to come back', () => {
+    const h = connected();
+    h.socket.onmessage?.({ data: ':tmi.twitch.tv 001 justinfan :Welcome\r\n' });
+    h.socket.onclose?.();
+    h.source.connect();
+    h.sockets[h.sockets.length - 1]?.onclose?.();
+    expect(h.messages.map(textOf).filter((t) => t === 'lost — twitch/c')).toHaveLength(1);
+  });
+
   it('runs connect again when the retry timer fires', () => {
     const h = harness();
     h.source.connect();

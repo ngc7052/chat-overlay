@@ -19,6 +19,12 @@ export interface Endpoints {
    * the minutes a real install waits. Null everywhere else.
    */
   watchdogMs: number | null;
+  /**
+   * Collapses the wait before the bar reports a connection as down, so a run
+   * does not have to sit through the seconds a real install spends ignoring an
+   * ordinary reconnect. Null everywhere else.
+   */
+  alertMs: number | null;
 }
 
 export interface EndpointEnv {
@@ -29,6 +35,7 @@ export interface EndpointEnv {
   OVERLAY_GG_CHANNEL_ICON_BASE?: string | undefined;
   OVERLAY_TWITCH_EMOTE_BASE?: string | undefined;
   OVERLAY_TEST_WATCHDOG_MS?: string | undefined;
+  OVERLAY_TEST_ALERT_MS?: string | undefined;
 }
 
 export function resolveEndpoints(env: EndpointEnv): Endpoints {
@@ -40,6 +47,7 @@ export function resolveEndpoints(env: EndpointEnv): Endpoints {
     twitchEmoteBase: env.OVERLAY_TWITCH_EMOTE_BASE ?? null,
     // Unset, empty and unparseable all mean "leave the watchdog alone".
     watchdogMs: Number(env.OVERLAY_TEST_WATCHDOG_MS) || null,
+    alertMs: Number(env.OVERLAY_TEST_ALERT_MS) || null,
   };
 }
 

@@ -122,6 +122,9 @@ const child = spawn(process.execPath, [electron, '--no-sandbox', driver], {
     // test run, so the stall scenario shrinks the watchdog to a couple of
     // seconds. Every other run leaves it empty and gets the shipped numbers.
     OVERLAY_TEST_WATCHDOG_MS: scenario === 'stall' ? '2500' : '',
+    // Same idea for the pause the bar takes before reporting a connection as
+    // down: seconds of deliberate patience in a real install, a moment here.
+    OVERLAY_TEST_ALERT_MS: scenario === 'drop' || scenario === 'stall' ? '400' : '',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],

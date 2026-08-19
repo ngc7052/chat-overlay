@@ -239,10 +239,10 @@ describe('TwitchSource events', () => {
     expect(h.messages).toHaveLength(count);
   });
 
-  it('turns a timeout into a per-user removal', () => {
+  it('turns a timeout into a per-user removal scoped to this channel', () => {
     const h = harness();
     h.socket.onmessage?.({ data: ':tmi.twitch.tv CLEARCHAT #xqc :BadUser' });
-    expect(h.removals).toEqual([{ platform: 'twitch', user: 'baduser' }]);
+    expect(h.removals).toEqual([{ platform: 'twitch', channel: 'xqc', user: 'baduser' }]);
   });
 
   it('turns a full clear into a channel removal', () => {

@@ -7,14 +7,19 @@ export interface IrcMessage {
   params: string[];
 }
 
-/** IRCv3 tag values escape the characters that would break the wire format. */
+const TAG_ESCAPES: Record<string, string> = { s: ' ', n: '\n', r: '\r', ':': ';', '\\': '\\' };
+
+/**
+ * IRCv3 tag values escape the characters that would break the wire format.
+ *
+ * One pass over the whole value, because a replace per escape reads its own
+ * output: turning `\\` into `\` first leaves a backslash for the `\s` rule to
+ * find, and `\\s` on the wire — a literal backslash then an s — came out as
+ * a backslash and a space. Anything else after a backslash loses the backslash,
+ * which is what the spec asks for, a trailing one included.
+ */
 export function unescapeTag(v: string): string {
-  return String(v)
-    .replace(/\\s/g, ' ')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r')
-    .replace(/\\:/g, ';')
-    .replace(/\\\\/g, '\\');
+  return String(v).replace(/\\(.?)/g, (_m, ch: string) => TAG_ESCAPES[ch] ?? ch);
 }
 
 export function parseIrc(line: string): IrcMessage {

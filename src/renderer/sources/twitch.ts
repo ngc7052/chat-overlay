@@ -156,7 +156,7 @@ export class TwitchSource extends BaseSource {
       case 'CLEARCHAT': {
         const target = params[params.length - 1];
         if (target && !target.startsWith('#')) {
-          this.onRemove({ platform: 'twitch', user: target.toLowerCase() });
+          this.onRemove({ platform: 'twitch', channel: this.channel, user: target.toLowerCase() });
         } else {
           this.onRemove({ platform: 'twitch', channel: this.channel, all: true });
         }

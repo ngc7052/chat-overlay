@@ -217,7 +217,20 @@ describe('messagesToRemove', () => {
   });
 
   it('removes one user on one platform only', () => {
-    expect(messagesToRemove({ platform: 'twitch', user: 'nero' }, rendered)).toEqual(['a']);
+    expect(messagesToRemove({ platform: 'twitch', channel: 'xqc', user: 'nero' }, rendered))
+      .toEqual(['a']);
+  });
+
+  // Watching several channels at once is the point of the app, and a timeout is
+  // issued by one channel's moderators. It must not follow the user into a
+  // channel where nobody moderated them.
+  it('leaves the same user alone in another channel of the same platform', () => {
+    const bothChannels = [
+      { id: 'a', platform: 'twitch', channel: 'chan_one', user: 'bob' },
+      { id: 'b', platform: 'twitch', channel: 'chan_two', user: 'bob' },
+    ];
+    expect(messagesToRemove({ platform: 'twitch', channel: 'chan_one', user: 'bob' }, bothChannels))
+      .toEqual(['a']);
   });
 
   it('clears a whole channel', () => {

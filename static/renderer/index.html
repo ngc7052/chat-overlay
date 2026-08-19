@@ -21,7 +21,14 @@
         <circle cx="5" cy="8" r="1.4"/><circle cx="11" cy="8" r="1.4"/>
         <circle cx="5" cy="12" r="1.4"/><circle cx="11" cy="12" r="1.4"/>
       </svg>
-      <span id="status"></span>
+      <!-- The per-channel readout, hidden until the pointer is over the
+           window, and the one thing the bar says at rest: the exception. -->
+      <span id="status">
+        <span id="src-list" class="src-list"></span>
+        <span id="src-alert" class="src-alert" hidden>
+          <span class="alert-dot"></span><span id="alert-text" class="alert-text"></span>
+        </span>
+      </span>
     </div>
     <button id="btn-update" class="icon-btn accent" title="A new version is available" hidden>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

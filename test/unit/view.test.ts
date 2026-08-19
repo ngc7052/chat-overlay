@@ -4,7 +4,7 @@ import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage } from '../../src/renderer/sources/types.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -175,6 +175,47 @@ describe('statusDots', () => {
   it('assumes connecting for a source with no state yet', () => {
     expect(statusDots([sources[0]!], new Map())[0])
       .toEqual({ key: 'twitch:xqc', label: 'tw/xqc', state: 'connecting', title: 'tw/xqc — connecting' });
+  });
+});
+
+describe('barAlert', () => {
+  const dot = (key: string, state: 'online' | 'offline' | 'error' | 'connecting') =>
+    ({ key, label: key, state, title: key + ' — ' + state });
+
+  it('says nothing at all while every channel is connected', () => {
+    // The healthy answer is silence: the arriving messages already prove it,
+    // and a permanent green light over a game buys nothing.
+    expect(barAlert([dot('tw/a', 'online'), dot('gg/b', 'online')]))
+      .toEqual({ level: 'ok', text: '', title: 'tw/a — online\ngg/b — online' });
+  });
+
+  it('says nothing when no channel is configured', () => {
+    // An empty list is legitimate; the hint in the chat body covers it.
+    expect(barAlert([])).toEqual({ level: 'ok', text: '', title: '' });
+  });
+
+  it('counts the ones that are down while the rest still carry chat', () => {
+    expect(barAlert([dot('tw/a', 'online'), dot('gg/b', 'connecting')]))
+      .toMatchObject({ level: 'warn', text: '1 of 2 offline' });
+    expect(barAlert([dot('tw/a', 'online'), dot('gg/b', 'error'), dot('tw/c', 'offline')]))
+      .toMatchObject({ level: 'warn', text: '2 of 3 offline' });
+  });
+
+  it('separates "some of it stopped" from "all of it stopped"', () => {
+    // Different problems: with one channel still talking there is nothing to
+    // do, and with none the feed has frozen — which is the question a user
+    // actually asks when chat goes quiet.
+    expect(barAlert([dot('tw/a', 'offline'), dot('gg/b', 'connecting')]))
+      .toMatchObject({ level: 'down', text: 'all channels offline' });
+  });
+
+  it('does not count channels when there is only one', () => {
+    expect(barAlert([dot('tw/a', 'error')])).toMatchObject({ level: 'down', text: 'offline' });
+  });
+
+  it('carries every channel state in the tooltip', () => {
+    expect(barAlert([dot('tw/a', 'online'), dot('gg/b', 'error')]).title)
+      .toBe('tw/a — online\ngg/b — error');
   });
 });
 

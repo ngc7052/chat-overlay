@@ -236,8 +236,7 @@ export class GoodGameSource extends BaseSource {
     ws.onclose = () => {
       if (this.ws !== ws) return;
       this.ws = null;
-      this.status('offline');
-      this.scheduleRetry();
+      this.socketGone();
     };
   }
 

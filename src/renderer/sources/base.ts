@@ -35,6 +35,9 @@ export abstract class BaseSource {
   protected retryTimer: unknown = null;
   protected watchdog: unknown = null;
   private probing = false;
+  /** Whether this source has ever been connected, so a drop can be told from
+      a channel that has never come up in the first place. */
+  private wasOnline = false;
   emoteMap = new Map<string, { url: string; fallback?: string }>();
   badgeMap = new Map<string, { url: string; title: string }>();
 
@@ -81,7 +84,29 @@ export abstract class BaseSource {
   }
 
   protected status(state: ConnectionState, detail = ''): void {
+    if (state === 'online') this.wasOnline = true;
     this.onStatus({ key: this.key, platform: this.platform, channel: this.channel }, state, detail);
+  }
+
+  /**
+   * The socket went away by itself — the server closed it, or the network did.
+   *
+   * This writes the line the feed was missing. A connection coming back has
+   * always said so; one going away said nothing at all, so a reader of the
+   * feed saw "connected — twitch/x", then silence, and could not tell a dead
+   * socket from a channel where nobody was talking. That is the whole question
+   * the liveness work exists to answer, and while the overlay is locked the
+   * feed is the only surface left to answer it on.
+   *
+   * Only for a connection that was working: a channel that has never come up
+   * retries on a backoff curve, and announcing each attempt would bury the
+   * chat under a connection log.
+   */
+  protected socketGone(): void {
+    this.status('offline');
+    if (this.wasOnline) this.system(`lost — ${this.platform}/${this.channel}`);
+    this.wasOnline = false;
+    this.scheduleRetry();
   }
 
   protected system(text: string, kind: 'system' | 'event' = 'system'): void {

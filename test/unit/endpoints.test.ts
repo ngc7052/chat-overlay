@@ -13,7 +13,7 @@ describe('resolveEndpoints', () => {
       .toEqual({
         twitchWs: null, goodgameWs: null,
         ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
-        watchdogMs: null,
+        watchdogMs: null, alertMs: null,
       });
   });
 
@@ -25,13 +25,14 @@ describe('resolveEndpoints', () => {
       OVERLAY_GG_CHANNEL_ICON_BASE: 'http://127.0.0.1:1/files/icons/',
       OVERLAY_TWITCH_EMOTE_BASE: 'http://127.0.0.1:1/emoticons/v2/',
       OVERLAY_TEST_WATCHDOG_MS: '2500',
+      OVERLAY_TEST_ALERT_MS: '400',
     })).toEqual({
       twitchWs: 'ws://127.0.0.1:1/irc',
       goodgameWs: 'ws://127.0.0.1:1/chat2/',
       ggIconBase: 'http://127.0.0.1:1/gg-icons/',
       ggChannelIconBase: 'http://127.0.0.1:1/files/icons/',
       twitchEmoteBase: 'http://127.0.0.1:1/emoticons/v2/',
-      watchdogMs: 2500,
+      watchdogMs: 2500, alertMs: 400,
     });
   });
 
@@ -39,7 +40,7 @@ describe('resolveEndpoints', () => {
     expect(resolveEndpoints({ OVERLAY_TWITCH_WS: 'ws://x/1' })).toEqual({
       twitchWs: 'ws://x/1', goodgameWs: null,
       ggIconBase: null, ggChannelIconBase: null, twitchEmoteBase: null,
-      watchdogMs: null,
+      watchdogMs: null, alertMs: null,
     });
   });
 
@@ -49,6 +50,9 @@ describe('resolveEndpoints', () => {
     expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: '' }).watchdogMs).toBeNull();
     expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: 'soon' }).watchdogMs).toBeNull();
     expect(resolveEndpoints({ OVERLAY_TEST_WATCHDOG_MS: '0' }).watchdogMs).toBeNull();
+    expect(resolveEndpoints({ OVERLAY_TEST_ALERT_MS: '' }).alertMs).toBeNull();
+    expect(resolveEndpoints({ OVERLAY_TEST_ALERT_MS: 'later' }).alertMs).toBeNull();
+    expect(resolveEndpoints({ OVERLAY_TEST_ALERT_MS: '0' }).alertMs).toBeNull();
   });
 });
 

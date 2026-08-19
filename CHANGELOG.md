@@ -1,5 +1,106 @@
 # chat-overlay
 
+## 1.3.0
+
+### Minor Changes
+
+- 945b985: **The top bar now says nothing while every channel is connected, and says
+  plainly what is wrong when one is not.** It used to show a row of small
+  coloured dots — one per channel, names hidden until you moved the pointer over
+  the window. Healthy or dead, that row looked much the same: two green dots
+  became two amber ones, seven pixels each, at the far corner of the overlay,
+  over whatever game was behind it. It cost screen space every second of every
+  session to say "as expected", and it was easy to miss when it stopped saying
+  that.
+  
+  Now the bar is empty while everything is working, and when a connection goes
+  it writes what happened — `1 of 2 offline`, or `all channels offline` when
+  nothing is getting through any more. Something appearing where there was
+  nothing is far harder to miss than a dot changing colour, and the wording
+  answers the question you actually have when chat goes quiet: is nobody talking,
+  or has this stopped working? It waits a few seconds first, so an ordinary
+  reconnect that fixes itself passes without a word. Moving the pointer over the
+  window still shows every channel, each name now beside its own dot.
+  
+  **The chat itself now says when a connection is lost, not only when one comes
+  back.** A channel coming up has always written `connected — twitch/name`; a
+  channel going away wrote nothing at all, so after a drop the most recent thing
+  the chat had to say about a dead connection was that it was connected. It now
+  writes `lost — twitch/name` when a working connection goes — which is also the
+  only place this can be said while the overlay is locked and the bar is hidden.
+  
+  A channel that has dropped is also no longer drawn in the same grey as one that
+  was never switched on.
+- 7e77edb: **Links in chat can be opened and copied.** A url posted in chat was styled
+  like a link but was inert: nothing happened when you clicked it, and global
+  text selection meant you could not even copy it off the screen. Unlocked, a
+  click now opens it in your normal browser and it can be selected like text.
+  Locked, the click still goes straight through to the game, and dragging the
+  window by the chat is unchanged — only the link itself opts out.
+  
+  **The Update button keeps its icon.** As soon as an update was offered the
+  button replaced its own contents with plain text, so the download arrow
+  disappeared for exactly as long as there was an update to install.
+  
+  **"Overall opacity" no longer fades the settings panel.** It was applied to the
+  whole window, so turning the chat down to its 20% floor took the settings panel
+  and the top bar with it — including the slider you needed to turn it back up.
+  It now applies to the chat feed alone.
+  
+  **The lock button's tooltip names the hotkey you actually bound.** It was
+  hard-coded to `Ctrl+Alt+O` and never changed when you rebound the shortcut,
+  which is the worst possible moment to be told the wrong combination.
+
+### Patch Changes
+
+- 24bc3b1: **A timeout or ban now only clears that person's messages in the channel they
+  were moderated in.** Watching several channels of the same platform at once,
+  one channel's moderators would wipe the user's lines out of all of them —
+  their messages in channels where nothing had happened disappeared too. Each
+  removal is now scoped to the channel that sent it, on both Twitch and
+  GoodGame.
+- c159c1d: Third-party emotes and Twitch badge artwork no longer stay missing for hours
+  after a brief network blip. A channel that connected while 7TV, BetterTTV,
+  FrankerFaceZ or the badge mirror happened to be unreachable stored the gaps as
+  if they were the catalogue, and kept serving them for six hours — across
+  restarts, long after every provider was back. One flaky minute was enough.
+  
+  Nothing is stored now unless at least one provider answered, and a catalogue
+  assembled without one of them is kept for minutes rather than hours, so the
+  next launch finds out whether that provider is back. Emotes already on screen
+  in the running session are unaffected either way.
+  
+  Starting with two channels also no longer downloads the same catalogue twice.
+  They connect at the same moment, and the cache was only filled once a download
+  finished, so both missed it and each pulled the full list of smiles; they share
+  the one download now.
+- 24bc3b1: **Twitch display names and sub notifications keep a literal backslash intact.**
+  A backslash followed by a letter was decoded twice, so text like `\some` lost
+  the letter after the backslash and gained a space in its place.
+- d904ee7: A hand-edited or half-written `config.json` can no longer leave the overlay
+  unusable. Every numeric setting is now held to the same range its slider
+  offers, and a value that is not a number falls back to the default instead of
+  reaching the window or the stylesheet as it was written.
+  
+  This mattered most for opacity: `0` on a locked overlay is an app that is
+  running, on top, invisible *and* click-through, with no way to reach Settings
+  and put it right — and it came back that way on every launch. It clamps to 20%
+  now. So do the rest: a `maxMessages` of 0 no longer trims every message the
+  instant it arrives, a `fadeDuration` of `"nope"` no longer reaches CSS as
+  `--fade: nopes`, and a window saved with a nonsense size still opens big enough
+  to grab.
+  
+  Settings are also written to disk far less often. Dragging a slider used to
+  mean a blocking file write for every tick of it, and typing a channel name one
+  per keystroke; those are coalesced now. Locking and unlocking still saves
+  immediately, as does quitting, so nothing is lost.
+- 5dba319: A chat connection that dies without saying so is now noticed and reconnected,
+  instead of showing as connected forever. Sleeping a laptop, switching Wi-Fi or
+  sitting behind a router that quietly forgets the connection used to leave the
+  status dot green on a feed that would never carry another message; the app now
+  checks that the other end is still there, and when it is not, says so in the
+  feed and reconnects on its own. A channel that is simply quiet is left alone.
+
 ## 1.2.0
 
 Released 2026-08-16.

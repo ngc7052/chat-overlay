@@ -229,11 +229,11 @@ body.settings-open #btn-settings { color: var(--ui-text); background: var(--ui-b
 #chat::-webkit-scrollbar-track { background: transparent; }
 
 /*
- * Unlocked, the chat itself moves the window: there is no text to select
- * (selection is off globally) and no link to click, so dragging anywhere in
- * the feed is free. Tied to the lock class, never to :hover — a drag region
- * that appears and disappears under the pointer is what caused the bar to
- * flicker.
+ * Unlocked, the chat itself moves the window, so there is no hunting for a
+ * strip to grab: the only thing in the feed worth aiming at is a link, and
+ * that opts back out below. Tied to the lock class, never to :hover — a drag
+ * region that appears and disappears under the pointer is what caused the bar
+ * to flicker.
  */
 body:not(.locked) #chat { -webkit-app-region: drag; }
 
@@ -366,6 +366,23 @@ body.outline .msg {
 .msg .colon { opacity: .75; margin-right: 4px; }
 .msg .text { color: #f2f5fb; }
 .msg .url { color: #8ec5ff; text-decoration: underline; text-underline-offset: 2px; }
+/*
+ * A link is the one thing in the feed there is anything to do with, so it is
+ * the one thing that opts out of the feed's drag region — drawing on top of a
+ * drag rect does not mask it, only an explicit no-drag subtracts. That also
+ * makes it the only run of text the mouse can reach, which is what lets it be
+ * swept and copied; the rest of the feed stays drag surface, so dragging the
+ * window by the chat still works. Locked, the window is click-through and the
+ * game gets the click, so none of this applies.
+ */
+body:not(.locked) .msg .url {
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+  user-select: text;
+}
+/* Paint only. Anything that reflowed here would resize a drag region under the
+   pointer, which is the flicker loop the bar taught us about. */
+body:not(.locked) .msg .url:hover { color: #c2dcff; }
 .msg .mention { color: #ffd479; font-weight: 800; }
 
 .msg.action .text { font-style: italic; }

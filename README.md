@@ -36,6 +36,7 @@ Saved instantly, restored next launch.
 | `Ctrl`+`Alt`+`O` | lock / unlock — locked means click-through |
 | `Ctrl`+`Alt`+`H` | hide / show |
 | Drag the top bar | move it (unlock first) |
+| Click a link in chat | opens it in your browser (unlock first) |
 | Drag the bottom-right corner | resize it |
 | Tray icon | the same, by mouse |
 

@@ -115,7 +115,3 @@ export function splitUrls(text: string): MessagePart[] {
   if (last < text.length) out.push({ type: 'text', value: text.slice(last) });
   return out;
 }
-
-export function clamp(n: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, n));
-}

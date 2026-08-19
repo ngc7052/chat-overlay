@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAssetApi, GG_TTL_MS, TW_TTL_MS, URLS } from '../../src/renderer/emotes/index.js';
+import { createAssetApi, DEGRADED_TTL_MS, GG_TTL_MS, TW_TTL_MS, URLS } from '../../src/renderer/emotes/index.js';
 import type { StorageLike } from '../../src/renderer/emotes/index.js';
 
 function memoryStorage(seed: Record<string, string> = {}): StorageLike & { data: Record<string, string> } {
@@ -86,6 +86,29 @@ describe('goodgameSmiles', () => {
     const api = createAssetApi({ httpJson: httpFor({ [URLS.ggSmiles]: ggPayload }), storage: null });
     await expect(api.goodgameSmiles('5')).resolves.toBeInstanceOf(Map);
   });
+
+  it('downloads the catalogue once when two channels connect at the same moment', async () => {
+    const httpJson = httpFor({ [URLS.ggSmiles]: ggPayload });
+    const api = createAssetApi({ httpJson });
+    const [first, second] = await Promise.all([api.goodgameSmiles('5'), api.goodgameSmiles('9')]);
+    expect(httpJson).toHaveBeenCalledTimes(1);
+    expect(first.get('peka')).toBeDefined();
+    expect(second.get('peka')).toBeDefined();
+  });
+
+  it('retries after a failed download instead of remembering the failure', async () => {
+    let offline = true;
+    const httpJson = vi.fn(async () => {
+      if (offline) throw new Error('offline');
+      return ggPayload;
+    });
+    const api = createAssetApi({ httpJson });
+    await expect(api.goodgameSmiles('5')).rejects.toThrow('offline');
+
+    offline = false;
+    await expect(api.goodgameSmiles('5')).resolves.toEqual(expect.any(Map));
+    expect((await api.goodgameSmiles('5')).get('peka')).toBeDefined();
+  });
 });
 
 describe('twitchThirdParty', () => {
@@ -147,6 +170,65 @@ describe('twitchThirdParty', () => {
     await createAssetApi({ httpJson: second, storage, now: () => now }).twitchThirdParty('42');
     expect(second).toHaveBeenCalled();
   });
+
+  it('fetches each provider once when a room is asked for twice at once', async () => {
+    const httpJson = httpFor(urls('42'));
+    const api = createAssetApi({ httpJson });
+    const [a, b] = await Promise.all([api.twitchThirdParty('42'), api.twitchThirdParty('42')]);
+    expect(httpJson).toHaveBeenCalledTimes(6);   // one per endpoint, not two
+    expect(a).toBe(b);
+  });
+
+  it('does not persist a catalogue assembled while every provider was down', async () => {
+    const storage = memoryStorage();
+    const down = httpFor({});
+    const empty = await createAssetApi({ httpJson: down, storage }).twitchThirdParty('123');
+    expect(empty.size).toBe(0);
+    expect(Object.keys(storage.data)).toEqual([]);
+
+    // Providers back, app restarted: the emotes must return, not the outage.
+    const back = httpFor(urls('123'));
+    const map = await createAssetApi({ httpJson: back, storage }).twitchThirdParty('123');
+    expect(map.has('GlobalSeven')).toBe(true);
+    expect(map.has('BttvGlobal')).toBe(true);
+  });
+
+  it('keeps a catalogue missing a provider for minutes, not hours', async () => {
+    const storage = memoryStorage();
+    let now = 1_000;
+    const partial = { ...urls('42') };
+    delete (partial as Record<string, unknown>)[URLS.sevenTvGlobal];
+    const first = await createAssetApi({ httpJson: httpFor(partial), storage, now: () => now })
+      .twitchThirdParty('42');
+    expect(first.has('GlobalSeven')).toBe(false);
+    expect(storage.data['tw3:42']).toBeDefined();
+
+    // A restart moments later is still served what we had.
+    now += DEGRADED_TTL_MS - 1;
+    const soon = httpFor(urls('42'));
+    const kept = await createAssetApi({ httpJson: soon, storage, now: () => now }).twitchThirdParty('42');
+    expect(soon).not.toHaveBeenCalled();
+    expect(kept.has('BttvGlobal')).toBe(true);
+
+    // Minutes later — nowhere near the six hours a complete catalogue would
+    // have earned — 7TV is tried again, and its emotes come back.
+    now += 2;
+    const later = httpFor(urls('42'));
+    const healed = await createAssetApi({ httpJson: later, storage, now: () => now }).twitchThirdParty('42');
+    expect(later).toHaveBeenCalled();
+    expect(healed.has('GlobalSeven')).toBe(true);
+  });
+
+  it('honours an entry written before lifetimes were stored', async () => {
+    const storage = memoryStorage({
+      'tw3:42': JSON.stringify({ t: 1_000, v: [['OldEmote', { url: 'https://cdn/old' }]] }),
+    });
+    const httpJson = httpFor(urls('42'));
+    const api = createAssetApi({ httpJson, storage, now: () => 1_000 + TW_TTL_MS });
+    const map = await api.twitchThirdParty('42');
+    expect(httpJson).not.toHaveBeenCalled();
+    expect(map.get('OldEmote')?.url).toBe('https://cdn/old');
+  });
 });
 
 describe('twitchBadges', () => {
@@ -189,5 +271,36 @@ describe('twitchBadges', () => {
   it('stays quiet when no warning handler is supplied', async () => {
     const api = createAssetApi({ httpJson: httpFor({}) });
     await expect(api.twitchBadges('42')).resolves.toBeInstanceOf(Map);
+  });
+
+  it('asks the mirror once when a room is requested twice at once', async () => {
+    const httpJson = httpFor(badgeUrls('42'));
+    const api = createAssetApi({ httpJson });
+    await Promise.all([api.twitchBadges('42'), api.twitchBadges('42')]);
+    expect(httpJson).toHaveBeenCalledTimes(2);   // one per endpoint, not four
+  });
+
+  it('does not persist badge artwork fetched while the mirror was down', async () => {
+    const storage = memoryStorage();
+    const empty = await createAssetApi({ httpJson: httpFor({}), storage }).twitchBadges('42');
+    expect(empty.size).toBe(0);
+    expect(Object.keys(storage.data)).toEqual([]);
+
+    const back = httpFor(badgeUrls('42'));
+    const map = await createAssetApi({ httpJson: back, storage }).twitchBadges('42');
+    expect(map.get('moderator/1')?.url).toBe('https://cdn/mod');
+  });
+
+  it('keeps badges missing the channel set for minutes, not hours', async () => {
+    const storage = memoryStorage();
+    let now = 1_000;
+    const partial = { ...badgeUrls('42') };
+    delete (partial as Record<string, unknown>)[URLS.badgesChannel('42')];
+    await createAssetApi({ httpJson: httpFor(partial), storage, now: () => now }).twitchBadges('42');
+
+    now += DEGRADED_TTL_MS + 1;
+    const later = httpFor(badgeUrls('42'));
+    const map = await createAssetApi({ httpJson: later, storage, now: () => now }).twitchBadges('42');
+    expect(map.get('subscriber/0')?.url).toBe('https://cdn/sub');
   });
 });

@@ -252,8 +252,8 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
      comes from the main process (`src/main/pointer.ts`), not from CSS.
   2. **Drawing on top of a drag region does not mask it.** An element with no
      app-region of its own contributes nothing; only an explicit `no-drag`
-     subtracts. The settings panel, the resize corner and the scrollbar strip
-     all have to say so.
+     subtracts. The settings panel, the resize corner, the scrollbar strip and
+     the links in the feed all have to say so.
   3. **Never resize a drag region on hover.** Chromium recomputes the region,
      which disturbs the pointer, which drops the hover, which resizes it back —
      a flicker loop several times a second. Hover may repaint; it may not

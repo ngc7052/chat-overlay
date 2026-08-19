@@ -269,7 +269,11 @@ export class GoodGameSource extends BaseSource {
       case 'ban':
       case 'ban_user':
         if (d.user_name) {
-          this.onRemove({ platform: 'goodgame', user: String(d.user_name).toLowerCase() });
+          this.onRemove({
+            platform: 'goodgame',
+            channel: this.channel,
+            user: String(d.user_name).toLowerCase(),
+          });
         }
         return;
 

@@ -114,9 +114,14 @@ export function messagesToRemove(
   rendered: { id: string; platform: string; channel: string; user: string }[],
 ): string[] {
   if (req.ids) return req.ids;
+  // Moderation belongs to the channel it happened in. The same person can be
+  // in several channels of one platform at once, and a ban in one says nothing
+  // about the others — so both branches match the channel, not just the clear.
+  const sameChannel = (m: { platform: string; channel: string }): boolean =>
+    m.platform === req.platform && m.channel === req.channel;
   return rendered.filter((m) => {
-    if (req.all) return m.platform === req.platform && m.channel === req.channel;
-    if (req.user) return m.platform === req.platform && m.user === req.user;
+    if (req.all) return sameChannel(m);
+    if (req.user) return sameChannel(m) && m.user === req.user;
     return false;
   }).map((m) => m.id);
 }

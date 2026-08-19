@@ -11,7 +11,6 @@ const api = {
 
   setLocked: (locked: boolean) => ipcRenderer.invoke('window:setLocked', locked),
   resizeBy: (dx: number, dy: number) => ipcRenderer.invoke('window:resizeBy', dx, dy),
-  moveBy: (dx: number, dy: number) => ipcRenderer.invoke('window:moveBy', dx, dy),
   quit: () => ipcRenderer.invoke('app:quit'),
   openExternal: (url: string) => ipcRenderer.invoke('shell:open', url),
 

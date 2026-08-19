@@ -47,6 +47,12 @@ function loadConfig(): void {
 }
 
 function saveConfig(): void {
+  // Cancel a pending debounced write: this call supersedes it, and on the
+  // will-quit path there may be no event loop left for the timer to fire on.
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
   try {
     fs.mkdirSync(path.dirname(configFile()), { recursive: true });
     fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), 'utf8');
@@ -296,8 +302,17 @@ ipcMain.handle('config:set', (_e, patch: Partial<Config>) => {
   const prevHotkeys = config.hotkeyLock + '|' + config.hotkeyHide;
   const prevAutoCheck = config.autoCheckUpdates;
   config = { ...config, ...patch };
-  saveConfig();
-  if (config.locked !== prevLock) applyLock();
+  // The renderer persists on every `input` event, so a slider drag or a typed
+  // channel name arrives here dozens of times a second — and the write is a
+  // blocking one on the main thread. Coalesce them. The lock state is not a
+  // preference, though: a crash must not leave the overlay unlocked on disk
+  // while it is locked on screen, so that one goes straight out.
+  if (config.locked !== prevLock) {
+    saveConfig();
+    applyLock();
+  } else {
+    saveConfigDebounced();
+  }
   if (config.hotkeyLock + '|' + config.hotkeyHide !== prevHotkeys) registerShortcuts();
   if (config.autoCheckUpdates !== prevAutoCheck) applyAutoCheck();
   updateTrayMenu();
@@ -320,13 +335,6 @@ ipcMain.handle('window:resizeBy', (_e, dx: number, dy: number) => {
     width: Math.max(220, Math.round(b.width + dx)),
     height: Math.max(120, Math.round(b.height + dy)),
   });
-  return win.getBounds();
-});
-
-ipcMain.handle('window:moveBy', (_e, dx: number, dy: number) => {
-  if (!win) return null;
-  const b = win.getBounds();
-  win.setBounds({ ...b, x: Math.round(b.x + dx), y: Math.round(b.y + dy) });
   return win.getBounds();
 });
 

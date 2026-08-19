@@ -18,6 +18,7 @@ interface OverlayApi {
   setLocked(locked: boolean): Promise<boolean>;
   resizeBy(dx: number, dy: number): Promise<unknown>;
   quit(): Promise<void>;
+  openExternal(url: string): Promise<void>;
   httpJson(url: string): Promise<unknown>;
   endpoints(): Promise<{
     twitchWs: string | null; goodgameWs: string | null;
@@ -60,6 +61,10 @@ const sourcesEl = $('sources');
 const hotkeyWarn = $('hotkey-warn');
 const settingsBtn = $<HTMLButtonElement>('btn-settings');
 const updateBtn = $<HTMLButtonElement>('btn-update');
+// The button's text lives in its own span: writing to the button itself would
+// replace its children, icon included.
+const updateLabel = $('update-label');
+const lockBtn = $<HTMLButtonElement>('btn-lock');
 const applyBtn = $<HTMLButtonElement>('btn-apply-update');
 const checkBtn = $<HTMLButtonElement>('btn-check-update');
 const updateStatus = $('update-status');
@@ -107,8 +112,17 @@ function applyAppearance(): void {
     root.setProperty(name, value);
   }
   document.body.classList.toggle('outline', config.outline);
-  document.body.style.opacity = String(config.opacity);
+  // The feed only. On <body> it faded the settings panel too, so dragging the
+  // slider to its floor left the control needed to drag it back at 20% over
+  // whatever game is behind it.
+  chatEl.style.opacity = String(config.opacity);
   trimMessages();
+}
+
+/** The lock button names the hotkey that undoes it, so it has to follow config. */
+function applyHotkeyHints(): void {
+  const accel = config.hotkeyLock.trim();
+  lockBtn.title = 'Hide the bar and let clicks pass through' + (accel ? ' (' + accel + ')' : '');
 }
 
 function applyLocked(locked: boolean): void {
@@ -152,10 +166,21 @@ function renderParts(container: HTMLElement, parts: MessagePart[]): void {
       }
       container.appendChild(img);
     } else if (p.type === 'url') {
-      const span = document.createElement('span');
-      span.className = 'url';
-      span.textContent = p.value;
-      container.appendChild(span);
+      const link = document.createElement('span');
+      link.className = 'url';
+      link.textContent = p.value;
+      link.title = 'Open in your browser';
+      const href = p.value;
+      link.addEventListener('click', () => {
+        // Locked, the window is click-through and the game gets the click —
+        // which is the whole point of the app. Only unlocked links open.
+        if (document.body.classList.contains('locked')) return;
+        // A drag that selected the link was a copy, not a click.
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed) return;
+        void overlay.openExternal(href);
+      });
+      container.appendChild(link);
     } else {
       container.appendChild(document.createTextNode(p.value));
     }
@@ -428,6 +453,7 @@ function bindSettings(): void {
     input.value = config[key];
     input.addEventListener('change', () => {
       config[key] = input.value.trim();
+      applyHotkeyHints();
       persist({ [key]: config[key] } as Partial<Config>);
     });
   }
@@ -646,7 +672,7 @@ async function refreshVersion(): Promise<void> {
 function offerUpdate(info: UpdateInfo): void {
   available = info;
   updateBtn.hidden = false;
-  updateBtn.textContent = 'Update to ' + info.version;
+  updateLabel.textContent = 'Update to ' + info.version;
   applyBtn.hidden = false;
   applyBtn.textContent = info.staged ? 'Restart to finish' : 'Download and restart';
   setUpdateStatus('Version ' + info.current + ' — v' + info.version + ' available');
@@ -666,13 +692,13 @@ async function applyUpdate(): Promise<void> {
   busy = true;
   const label = applyBtn.textContent;
   applyBtn.textContent = 'Downloading…';
-  updateBtn.textContent = 'Downloading…';
+  updateLabel.textContent = 'Downloading…';
   const res = await overlay.updateApply();
   if (res.error) {
     setUpdateStatus('Update failed: ' + res.error);
     systemLine('Update failed: ' + res.error);
     applyBtn.textContent = label;
-    updateBtn.textContent = 'Update to ' + available.version;
+    updateLabel.textContent = 'Update to ' + available.version;
     busy = false;
     return;
   }
@@ -721,6 +747,7 @@ void Promise.all([overlay.getConfig(), overlay.endpoints()]).then(([cfg, eps]) =
   endpoints = eps;
   applyCustomCss();
   applyAppearance();
+  applyHotkeyHints();
   applyLocked(config.locked);
   bindSettings();
   renderSourceRows();

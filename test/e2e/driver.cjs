@@ -336,6 +336,223 @@ async function scenarioYtEnded() {
     await q(DOTS));
 }
 
+/* ------------------------------------------------------------------ burst --
+ *
+ * The load a busy channel puts on the renderer, which no socket transcript
+ * reproduces. YouTube is a poll: one answer carries every message since the
+ * last one, so a channel like the one this was reported on hands the app two
+ * or three hundred messages in a single callback. Twitch and GoodGame trickle
+ * one per frame and always have, which is why rendering one message at a time
+ * survived this long.
+ *
+ * Measured rather than asserted about. The numbers printed here are the ones
+ * quoted in the changeset, and they come out of a real Electron rendering real
+ * messages, not out of a benchmark harness pretending to be one.
+ */
+
+const API = process.env.OVERLAY_TEST_API_BASE || '';
+
+/** Arm a burst; the fake server sends it on the next poll. */
+function armBurst({ n, tag, moderate = false }) {
+  return new Promise((resolve, reject) => {
+    const url = `${API}/e2e/burst?n=${n}&tag=${tag}&moderate=${moderate ? 1 : 0}`;
+    require('node:http').get(url, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve(JSON.parse(body)));
+    }).on('error', reject);
+  });
+}
+
+/**
+ * What the renderer actually did, counted by the browser itself.
+ *
+ * LayoutCount is Chromium's own tally of layout runs — the thing a read of
+ * scrollHeight between two DOM writes forces. It is read over the burst window
+ * only, so it is the cost of this batch and not of the session.
+ */
+let debuggerAttached = false;
+async function chromeMetrics() {
+  if (!debuggerAttached) {
+    win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Performance.enable');
+    debuggerAttached = true;
+  }
+  const { metrics } = await win.webContents.debugger.sendCommand('Performance.getMetrics');
+  const by = Object.fromEntries(metrics.map((m) => [m.name, m.value]));
+  return { layouts: by.LayoutCount, recalcs: by.RecalcStyleCount, layoutMs: by.LayoutDuration * 1000 };
+}
+
+/**
+ * A recorder inside the page: how the feed was written to, and how long the
+ * main thread was unavailable while it happened.
+ *
+ * The mutation records are the direct measure of the bug — one record per
+ * appended node is one-at-a-time; one record carrying the whole batch is one
+ * go. The frame gap is what the user sees: the longest stretch where nothing
+ * could be painted because the renderer was busy.
+ */
+const RECORDER = `(() => {
+  const rec = { records: 0, added: 0, removed: 0, maxAdded: 0, maxFrameGap: 0, frames: 0, live: true };
+  window.__burst = rec;
+  const mo = new MutationObserver((list) => {
+    for (const r of list) {
+      if (r.addedNodes.length) {
+        rec.records++;
+        rec.added += r.addedNodes.length;
+        rec.maxAdded = Math.max(rec.maxAdded, r.addedNodes.length);
+      }
+      rec.removed += r.removedNodes.length;
+    }
+  });
+  mo.observe(document.getElementById('chat'), { childList: true });
+  let last = performance.now();
+  const tick = (t) => {
+    rec.frames++;
+    rec.maxFrameGap = Math.max(rec.maxFrameGap, t - last);
+    last = t;
+    if (rec.live) requestAnimationFrame(tick); else mo.disconnect();
+  };
+  requestAnimationFrame(tick);
+  return true;
+})()`;
+
+const STOP_RECORDER = `(() => { window.__burst.live = false; return JSON.stringify(window.__burst); })()`;
+
+/** The ordinals painted, read off the message text the burst wrote. */
+const ORDINALS = (tag) => `Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .text'))
+  .map((t) => /^${tag} (\\d+)$/.exec(t.textContent))
+  .filter(Boolean).map((m) => Number(m[1]))`;
+
+const SCROLL = `JSON.stringify((() => {
+  const c = document.getElementById('chat');
+  return { top: c.scrollTop, height: c.scrollHeight, client: c.clientHeight,
+           fromBottom: c.scrollHeight - c.clientHeight - c.scrollTop };
+})())`;
+
+async function scenarioBurst() {
+  const cfg = await q(`window.overlay.getConfig()`);
+  const MAX = cfg.maxMessages;
+  check('the run is configured with the shipped message cap', MAX === 120, `maxMessages=${MAX}`);
+
+  check('youtube is connected before the burst',
+    await until(`document.querySelectorAll('.msg[data-platform="youtube"]').length > 0`, 25000));
+  // Let the scripted transcript finish, so the burst is measured on its own.
+  await wait(11000);
+  const settled = Number(await q(MSGS));
+  check('the ordinary transcript rendered first', settled > 0, `msgs=${settled}`);
+
+  /* --------------------------------------------------------- the burst -- */
+  const N = 300;
+  await q(RECORDER);
+  const before = await chromeMetrics();
+  const t0 = Date.now();
+  await armBurst({ n: N, tag: 'burst', moderate: true });
+  // 300 lines, four of them moderated away, against a 120 cap: the feed ends
+  // up holding exactly the cap, all of it from the burst.
+  const arrived = await until(`(${ORDINALS('burst')}).length >= 100`, 30000);
+  await wait(600);
+  const after = await chromeMetrics();
+  const rec = JSON.parse(await q(STOP_RECORDER));
+  const elapsed = Date.now() - t0;
+
+  const metrics = {
+    messages: N,
+    layouts: Math.round(after.layouts - before.layouts),
+    recalcs: Math.round(after.recalcs - before.recalcs),
+    layoutMs: Math.round((after.layoutMs - before.layoutMs) * 10) / 10,
+    appendRecords: rec.records,
+    nodesAppended: rec.added,
+    nodesRemoved: rec.removed,
+    largestAppend: rec.maxAdded,
+    maxFrameGapMs: Math.round(rec.maxFrameGap),
+    wallMs: elapsed,
+  };
+  console.log('\nBURST METRICS ' + JSON.stringify(metrics));
+
+  check('the burst arrived at all', arrived, JSON.stringify(metrics));
+
+  /* ------------------------------------------------ what must not break -- */
+  const ordinals = await q(ORDINALS('burst'));
+  const painted = Number(await q(MSGS));
+  check('the cap holds exactly', painted === MAX, `painted=${painted} max=${MAX}`);
+  // 300 arrive against a 120 cap, so the last 120 arrivals are the ones kept —
+  // four of which the moderator took down inside the same batch. The feed is
+  // still full: the gap is made up by the four newest messages from before the
+  // burst, which is what a cap holding exactly means.
+  check('the burst fills the feed and the older messages are trimmed away',
+    ordinals.length === MAX - 4, `burst=${ordinals.length} painted=${painted}`);
+  check('messages are in arrival order',
+    ordinals.every((v, i) => i === 0 || v > ordinals[i - 1]), JSON.stringify(ordinals.slice(0, 8)));
+  check('the newest message of the burst is the last one on screen',
+    ordinals[ordinals.length - 1] === Math.max(...ordinals), JSON.stringify(ordinals.slice(-3)));
+
+  // Moderation inside the same batch as the messages it acts on. Both the
+  // timeout and the ban name lines that are in the surviving tail, so a
+  // renderer that applied them only to what was already on screen leaves them
+  // up — which is the bug a queue makes possible and must not have.
+  const moderated = JSON.parse(await q(`JSON.stringify({
+    doomed: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).filter((n) => n.textContent === '@doomed').length,
+    troll: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).filter((n) => n.textContent === '@troll').length
+  })`));
+  check('a timeout in the same batch takes its message down before it is painted',
+    moderated.doomed === 0, `doomed=${moderated.doomed}`);
+  check('and a ban in the same batch takes every one of that author down',
+    moderated.troll === 0, `troll=${moderated.troll}`);
+
+  // The whole point: one write, not three hundred.
+  check('the batch is written to the feed in one go, not one message at a time',
+    rec.records <= 5 && rec.maxAdded >= 100,
+    `records=${rec.records} largest=${rec.maxAdded}`);
+  // 300 arrive, 120 can be on screen. Building the other 180 only to delete
+  // them is work nobody ever sees.
+  check('messages the cap will delete are never built',
+    rec.added <= MAX + 10, `appended=${rec.added} max=${MAX}`);
+  check('the renderer does not force a layout per message',
+    metrics.layouts < N / 4, `layouts=${metrics.layouts} for ${N} messages`);
+
+  /* ------------------------------------------------------------ scroll -- */
+  const pinned = JSON.parse(await q(SCROLL));
+  check('someone at the bottom stays pinned to it', pinned.fromBottom < 24, JSON.stringify(pinned));
+
+  await q(`document.getElementById('chat').scrollTop = 0; true`);
+  // The scroll listener is what turns auto-scroll off, and it runs off the
+  // event rather than the assignment.
+  check('scrolling up is registered', await until(`JSON.parse(${SCROLL}).fromBottom >= 24`, 3000));
+  await armBurst({ n: 30, tag: 'later' });
+  check('the later burst arrived', await until(`(${ORDINALS('later')}).length > 0`, 20000));
+  await wait(600);
+  const readingBack = JSON.parse(await q(SCROLL));
+  check('a user who has scrolled up is not yanked to the bottom',
+    readingBack.fromBottom >= 24, JSON.stringify(readingBack));
+
+  await q(`(() => { const c = document.getElementById('chat'); c.scrollTop = c.scrollHeight; return true; })()`);
+  check('scrolling back down is registered', await until(`JSON.parse(${SCROLL}).fromBottom < 24`, 3000));
+  await armBurst({ n: 30, tag: 'again' });
+  check('the third burst arrived', await until(`(${ORDINALS('again')}).length > 0`, 20000));
+  await wait(600);
+  const backAtBottom = JSON.parse(await q(SCROLL));
+  check('and someone who came back to the bottom is carried along again',
+    backAtBottom.fromBottom < 24, JSON.stringify(backAtBottom));
+
+  /* ---------------------------------------------------------- lifetime -- */
+  // A coalesced message still expires. Set the lifetime to a second, burst,
+  // and the burst must appear and then go.
+  // The slider steps in fives, so five seconds is the shortest life there is.
+  await q(`(() => {
+    const s = document.getElementById('messageLifetime');
+    s.value = '5';
+    s.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  })()`);
+  await armBurst({ n: 30, tag: 'brief' });
+  check('messages with a lifetime are painted',
+    await until(`(${ORDINALS('brief')}).length > 0`, 20000));
+  check('and then fade out on their own',
+    await until(`(${ORDINALS('brief')}).length === 0`, 25000),
+    await q(`(${ORDINALS('brief')}).length`));
+}
+
 const stateFile = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(PROFILE, 'payload-state.json'), 'utf8'));
@@ -447,6 +664,7 @@ app.whenReady().then(async () => {
     else if (SCENARIO === 'stall') await scenarioStall();
     else if (SCENARIO === 'yt-offline') await scenarioYtOffline();
     else if (SCENARIO === 'yt-ended') await scenarioYtEnded();
+    else if (SCENARIO === 'burst') await scenarioBurst();
     else if (SCENARIO === 'staged') await scenarioStaged();
     else if (SCENARIO === 'trials') await scenarioTrials();
     else await scenarioDegraded();

@@ -9,6 +9,7 @@
  *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
  *   node test/e2e/run.mjs --scenario=yt-offline a youtube channel that is not live yet
  *   node test/e2e/run.mjs --scenario=yt-ended   a youtube stream that ends mid-chat
+ *   node test/e2e/run.mjs --scenario=burst    a poll that lands hundreds of messages at once
  *   node test/e2e/run.mjs --scenario=staged   a downloaded payload must be run
  *   node test/e2e/run.mjs --scenario=trials   one that never starts is dropped
  *   node test/e2e/run.mjs --scenario=crash    one that throws is quarantined
@@ -92,7 +93,10 @@ writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
   bgOpacity: 0,
   hoverBgOpacity: 0.55,
   fontSize: 15,
-  maxMessages: 60,     // above the 43 lines the three transcripts add up to, so nothing is trimmed mid-run
+  // Above the 43 lines the three transcripts add up to, so nothing is trimmed
+  // mid-run — except in the burst scenario, which is about what happens when
+  // far more than the cap arrives at once and so wants the shipped default.
+  maxMessages: scenario === 'burst' ? 120 : 60,
   autoCheckUpdates: false,     // no network in a test run
 }, null, 2));
 

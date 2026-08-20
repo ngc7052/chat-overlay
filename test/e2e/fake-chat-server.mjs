@@ -364,7 +364,9 @@ function ytItem(m, origin, index) {
         liveChatTextMessageRenderer: {
           id: `yt-msg-${index}`,
           authorName: { simpleText: m.user },
-          authorExternalChannelId: `UCauthor${index}`,
+          // Overridable so a burst can put several lines behind one author and
+          // then ban that author in the same batch.
+          authorExternalChannelId: m.authorId ?? `UCauthor${index}`,
           timestampUsec: String(Date.now() * 1000),
           message: { runs },
           ...(badges.length ? { authorBadges: badges } : {}),
@@ -386,6 +388,51 @@ export async function startFakeChat({
   let origin = '';
   const startedAt = Date.now();
   const ytScript = script.filter((m) => m.platform === 'youtube');
+
+  /**
+   * Actions waiting to go out on the next poll, and the id counter that keeps
+   * them apart from the scripted transcript.
+   *
+   * A burst is the one thing the scripted, time-stamped transcript cannot
+   * express: it is not "messages arriving quickly", it is a single answer
+   * carrying hundreds of them, which is exactly what YouTube hands a busy
+   * channel and what neither socket protocol ever produces. It is driven from
+   * the test rather than from a clock so the run can say "now" and know the
+   * next poll carries it.
+   */
+  const ytQueued = [];
+  let ytNextId = 100000;
+
+  /**
+   * Build one burst: `n` lines from `n` different people, and — because a
+   * moderator acting on a busy chat is when this arrives — a timeout and a ban
+   * for lines *in the same batch*, sent after them exactly as YouTube does.
+   */
+  function ytBurst({ n, tag, moderate }) {
+    const base = ytNextId;
+    ytNextId += n;
+    const actions = [];
+    let doomedId = '';
+    for (let i = 0; i < n; i++) {
+      const ordinal = base + i;
+      // The last stretch of a moderated burst is the part that survives the
+      // trim, so that is where the removals have to land to be worth anything.
+      const doomed = moderate && i === n - 40;
+      const troll = moderate && (i === n - 30 || i === n - 20 || i === n - 10);
+      if (doomed) doomedId = `yt-msg-${ordinal}`;
+      actions.push(ytItem({
+        user: doomed ? '@doomed' : troll ? '@troll' : `@${tag}_${i}`,
+        text: `${tag} ${i}`,
+        ...(troll ? { authorId: 'UCbanned' } : {}),
+      }, origin, ordinal));
+    }
+    if (moderate) {
+      actions.push({ removeChatItemAction: { targetItemId: doomedId } });
+      actions.push({ removeChatItemByAuthorAction: { externalChannelId: 'UCbanned' } });
+    }
+    ytQueued.push(...actions);
+    return { first: base, last: base + n - 1 };
+  }
 
 
   /**
@@ -418,6 +465,9 @@ export async function startFakeChat({
       actions.push(ytItem(ytScript[next], origin, next));
       next++;
     }
+    // Anything a burst queued goes out with this one answer, which is the
+    // point: hundreds of messages in a single poll, not hundreds of polls.
+    actions.push(...ytQueued.splice(0));
     return ytFrame(actions, `yt-${next}`);
   }
 
@@ -504,6 +554,16 @@ export async function startFakeChat({
     }
     if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
       return readJson(req).then((body) => send(ytPoll(body)));
+    }
+
+    // Test control: arm a burst for the next poll. Not part of any protocol —
+    // the app never calls it, only the e2e driver does.
+    if (url.pathname === '/e2e/burst') {
+      return send(ytBurst({
+        n: Number(url.searchParams.get('n') ?? 300),
+        tag: url.searchParams.get('tag') ?? 'burst',
+        moderate: url.searchParams.get('moderate') === '1',
+      }));
     }
 
     if (url.pathname === '/api/getchannelstatus') {

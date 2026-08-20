@@ -6,9 +6,10 @@ import { YouTubeSource } from './sources/youtube.js';
 import type { BaseSource } from './sources/base.js';
 import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/types.js';
 import { debounce, timeString, type MessagePart } from './util.js';
+import { Feed } from './feed.js';
 import {
-  appearanceVars, badgeRendering, barAlert, emptyHint, messagesToRemove, platformIconPath,
-  platformMarker, platformTag, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  appearanceVars, badgeRendering, barAlert, emptyHint, pinnedToBottom, platformIconPath,
+  platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
   type BarAlert, type SourceStatus,
 } from './view.js';
 
@@ -88,8 +89,34 @@ let endpoints: {
 };
 let sources: BaseSource[] = [];
 const states = new Map<string, SourceStatus>();
-const nodes = new Map<string, { el: HTMLElement; timer: ReturnType<typeof setTimeout> | null }>();
 let autoScroll = true;
+
+/**
+ * The feed itself. Everything about *when* a message reaches the screen lives
+ * in ./feed; this is only the DOM half of it — build an element, put a batch
+ * in, take one out.
+ *
+ * The frame is what the batching hangs off: a poll that hands over three
+ * hundred messages at once becomes one build, one insert, one trim and one
+ * scroll instead of three hundred of each. `backgroundThrottling` is off for
+ * this window, so the frame keeps coming even when nothing is on top of it.
+ */
+const feed = new Feed<HTMLElement, ReturnType<typeof setTimeout>>({
+  build: buildMessage,
+  insert: (els) => {
+    const batch = document.createDocumentFragment();
+    for (const el of els) batch.appendChild(el);
+    chatEl.appendChild(batch);
+  },
+  detach: (el) => el.remove(),
+  fade: (el) => el.classList.add('fading'),
+  schedule: (flush) => requestAnimationFrame(flush),
+  // The one layout read per batch, and the only place it happens.
+  painted: () => { if (autoScroll) scrollToBottom(); },
+  config: () => config,
+  setTimer: (run, ms) => setTimeout(run, ms),
+  clearTimer: (handle) => clearTimeout(handle),
+});
 
 const getConfig = () => config;
 const assets = createAssetApi({
@@ -148,9 +175,7 @@ function scrollToBottom(): void {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-chatEl.addEventListener('scroll', () => {
-  autoScroll = chatEl.scrollHeight - chatEl.clientHeight - chatEl.scrollTop < 24;
-});
+chatEl.addEventListener('scroll', () => { autoScroll = pinnedToBottom(chatEl); });
 
 function chip(text: string, kind: string): HTMLElement {
   const el = document.createElement('span');
@@ -195,9 +220,8 @@ function renderParts(container: HTMLElement, parts: MessagePart[]): void {
   }
 }
 
-function addMessage(msg: ChatMessage): void {
-  if (nodes.has(msg.id) || shouldDrop(msg, config)) return;
-
+/** One message's element. Built, not inserted — the feed decides when. */
+function buildMessage(msg: ChatMessage): HTMLElement {
   const el = document.createElement('div');
   el.className = 'msg' + (msg.kind === 'system' ? ' system' : '') +
     (msg.kind === 'event' ? ' event' : '') + (msg.action ? ' action' : '');
@@ -264,50 +288,23 @@ function addMessage(msg: ChatMessage): void {
   renderParts(text, msg.parts);
   el.appendChild(text);
 
-  chatEl.appendChild(el);
-
-  const entry: { el: HTMLElement; timer: ReturnType<typeof setTimeout> | null } = { el, timer: null };
-  if (config.messageLifetime > 0) {
-    entry.timer = setTimeout(() => {
-      el.classList.add('fading');
-      setTimeout(() => removeMessage(msg.id), config.fadeDuration * 1000 + 60);
-    }, config.messageLifetime * 1000);
-  }
-  nodes.set(msg.id, entry);
-
-  trimMessages();
-  if (autoScroll) scrollToBottom();
+  return el;
 }
 
-function removeMessage(id: string): void {
-  const entry = nodes.get(id);
-  if (!entry) return;
-  if (entry.timer) clearTimeout(entry.timer);
-  entry.el.remove();
-  nodes.delete(id);
+function addMessage(msg: ChatMessage): void {
+  feed.add(msg);
 }
 
 function trimMessages(): void {
-  while (nodes.size > config.maxMessages) {
-    const oldest = nodes.keys().next().value;
-    if (oldest === undefined) break;
-    removeMessage(oldest);
-  }
+  feed.trim();
 }
 
 function handleRemove(req: RemoveRequest): void {
-  const rendered = Array.from(nodes.entries()).map(([id, entry]) => ({
-    id,
-    platform: entry.el.dataset['platform'] ?? '',
-    channel: entry.el.dataset['channel'] ?? '',
-    user: entry.el.dataset['user'] ?? '',
-    userId: entry.el.dataset['userid'] ?? '',
-  }));
-  messagesToRemove(req, rendered).forEach(removeMessage);
+  feed.apply(req);
 }
 
 function clearAll(): void {
-  for (const id of Array.from(nodes.keys())) removeMessage(id);
+  feed.clear();
 }
 
 function systemLine(text: string): void {

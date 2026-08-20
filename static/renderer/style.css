@@ -277,11 +277,24 @@ body.settings-open #btn-settings { color: var(--ui-text); background: var(--ui-b
   transition: background 120ms linear;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
   gap: 2px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
+/*
+ * The feed sits at the bottom while it is short, and can be scrolled back once
+ * it is not.
+ *
+ * `justify-content: flex-end` did the first and quietly prevented the second:
+ * content that overflows the *start* edge of a flex container is not part of
+ * its scrollable overflow, so as soon as there were more messages than fitted
+ * the window, `scrollHeight` equalled `clientHeight` and the ones above could
+ * not be reached at all — which also meant the auto-follow rule below could
+ * never see a user who had scrolled up, because nobody could. An auto margin
+ * on the first message pushes a short feed down without moving that edge.
+ */
+.msg:first-child { margin-top: auto; }
+
 #chat::-webkit-scrollbar { width: 6px; }
 #chat::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.22); border-radius: 3px; }
 #chat::-webkit-scrollbar-track { background: transparent; }

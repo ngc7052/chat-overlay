@@ -75,6 +75,24 @@ export function appearanceVars(config: Config): Record<string, string> {
   };
 }
 
+/**
+ * How close to the bottom counts as "at the bottom", in pixels.
+ *
+ * The feed follows new messages only for someone who is already at the end of
+ * it; a user who has scrolled back to read something must not be yanked away
+ * mid-sentence. A couple of lines of slack, because a scroll position lands on
+ * fractional pixels and a feed that stopped following after a one-pixel
+ * rounding error would look broken.
+ */
+export const PIN_SLACK_PX = 24;
+
+/** Whether the feed should follow new messages, given where it is scrolled. */
+export function pinnedToBottom(
+  view: { scrollHeight: number; clientHeight: number; scrollTop: number },
+): boolean {
+  return view.scrollHeight - view.clientHeight - view.scrollTop < PIN_SLACK_PX;
+}
+
 export interface SourceStatus { state: ConnectionState; detail: string }
 
 export interface StatusDot {

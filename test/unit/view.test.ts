@@ -3,8 +3,9 @@ import { normaliseConfig } from '../../src/main/config.js';
 import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage, ConnectionState } from '../../src/renderer/sources/types.js';
 import {
-  appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  platformTag, barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  appearanceVars, badgeRendering, emptyHint, messagesToRemove, PIN_SLACK_PX, pinnedToBottom,
+  platformIconPath, platformMarker, platformTag, barAlert, plainText, shouldDrop, sourceDotClass,
+  statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -347,5 +348,30 @@ describe('platform artwork and tags', () => {
   it('falls back rather than rendering a blank marker', () => {
     expect(platformIconPath('mystery')).toBe('../assets/goodgame.png');
     expect(platformTag('mystery')).toBe('gg');
+  });
+});
+
+describe('pinnedToBottom', () => {
+  // The feed follows new messages only for someone who is already at the end
+  // of it. Someone who has scrolled back to read something must be left where
+  // they are — being yanked to the bottom mid-sentence every time a busy
+  // channel says anything makes the overlay unreadable.
+  const view = (fromBottom: number) => ({ scrollHeight: 1000, clientHeight: 400, scrollTop: 600 - fromBottom });
+
+  it('follows the feed for someone sitting at the bottom', () => {
+    expect(pinnedToBottom(view(0))).toBe(true);
+  });
+
+  it('still follows within the slack, so a fractional scroll does not stop it', () => {
+    expect(pinnedToBottom(view(PIN_SLACK_PX - 1))).toBe(true);
+  });
+
+  it('lets go the moment someone has scrolled up past it', () => {
+    expect(pinnedToBottom(view(PIN_SLACK_PX))).toBe(false);
+    expect(pinnedToBottom(view(300))).toBe(false);
+  });
+
+  it('follows a feed too short to scroll at all', () => {
+    expect(pinnedToBottom({ scrollHeight: 200, clientHeight: 400, scrollTop: 0 })).toBe(true);
   });
 });

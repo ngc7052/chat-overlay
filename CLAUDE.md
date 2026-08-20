@@ -37,6 +37,7 @@ not in git.
 | `src/main/updater/` | release parsing, manifest safety, staging |
 | `src/renderer/sources/` | GoodGame + Twitch + YouTube protocol clients |
 | `src/renderer/emotes/` | emote and badge catalogues, caching |
+| `src/renderer/feed.ts` | what the feed holds and when it reaches the screen |
 | `src/renderer/view.ts` | what to show: filtering, formatting, status text |
 | `src/renderer/index.ts` | DOM wiring |
 | `static/` | html, css, icons, app manifest |
@@ -94,7 +95,7 @@ conversation that remembers where each caller's continuation token got to — an
 serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs nine scenarios in a couple of minutes, because the happy path
+`npm run e2e` runs ten scenarios in a couple of minutes, because the happy path
 is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
@@ -107,6 +108,7 @@ is the one thing a real install rarely stays on:
 | `--scenario=trials` | the same payload after three launches that never reported in — quarantined, moved aside, bundled one runs instead |
 | `--scenario=yt-offline` | a YouTube channel that is not live for the first six seconds — the state neither socket has. Nothing is broken, so it says so in the feed once, waits on its own slow cadence rather than a failure curve, and connects itself the moment a stream starts |
 | `--scenario=yt-ended` | a YouTube stream that ends mid-chat, while the channel page goes on advertising it for a few more seconds — the app must report the loss, decline to re-resolve it in a hot loop, and settle back to "not live" |
+| `--scenario=burst` | one poll answer carrying 300 messages, with a timeout and a ban for lines *inside the same batch* — what a busy YouTube channel does and what neither socket ever produces. Asserts the batch is written to the feed once rather than 300 times, that nothing over the cap is built at all, and that order, moderation, the cap, auto-scroll and message lifetimes all survive the queue. Prints the layout count and the longest main-thread block, which is where the before/after numbers come from |
 | `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
 
 `drop` and `stall` run the two socket channels alone. They exist to test what a
@@ -231,6 +233,24 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
 - **`package.json` version is the only place the version is set.** The build
   stamps `app/package.json` and `version.json` from it. A release tag that
   disagrees makes every install offer an update that can never succeed.
+- **The feed is written once per frame, not once per message.** Appending a
+  message and then reading `scrollHeight` to follow it forces a synchronous
+  layout. Twitch and GoodGame trickle a message per frame down a socket, so
+  one each was survivable; YouTube is a poll, and one answer carrying 300
+  messages became 300 forced layouts back to back before anything was painted.
+  Arrivals are queued in `src/renderer/feed.ts` and built into one insert on
+  the next frame. The consequence to keep in mind is that **a message can
+  exist without having an element**: a ban has to reach it, its lifetime is
+  already running, and the cap already counts it — none of which can be done
+  by reading the DOM. That is why removals match against the messages rather
+  than against `data-user`.
+- **The feed's scroll position is not `justify-content: flex-end`.** Content
+  overflowing the *start* edge of a flex container is not part of its
+  scrollable overflow, so with `flex-end` a feed taller than the window had
+  `scrollHeight === clientHeight` and could not be scrolled back at all — which
+  also made the auto-follow rule unreachable, because nobody could ever be
+  scrolled up. An auto top margin on the first message bottom-aligns a short
+  feed without moving that edge.
 - **Never write into the payload that is running.** The updater stages into
   `<userData>/payload-new`; `boot` installs it on the next launch. This is what
   stops Windows file locking from breaking an update.

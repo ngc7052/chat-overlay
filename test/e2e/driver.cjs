@@ -267,8 +267,8 @@ async function scenarioYtOffline() {
   check('the feed says the channel is not live, rather than leaving it blank',
     await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 15000),
     await q(`document.body.textContent.slice(-300)`));
-  check('and the dot says offline rather than error',
-    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /yt\\/@northlight — offline/.test(d.title))`, 15000),
+  check('and the dot says idle rather than error or offline',
+    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /yt\\/@northlight — idle — not live/.test(d.title))`, 15000),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
 
   // Six seconds in the channel goes live. Nothing is pressed.
@@ -309,6 +309,28 @@ async function scenarioYtEnded() {
   check('and it goes back to looking rather than giving up',
     await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 25000),
     await q(`document.body.textContent.slice(-300)`));
+
+  /*
+   * And the bar says nothing about it. A channel that is not streaming is the
+   * resting state of most channels most of the time; painting it as a failure
+   * would leave a permanent alert over the game for the ordinary case, which
+   * is the one thing this bar is designed never to do. Waited out past the
+   * alert's own grace, so this is the settled answer and not a gap in it.
+   */
+  // Read in one expression: the dot and the alert are written by the same
+  // render, so asking twice could straddle one and report a state that never
+  // existed. The harness re-checks a not-live channel every two seconds, and
+  // each check is a real `connecting` moment the alert's own grace swallows —
+  // which is why the text is asserted here rather than only what is painted.
+  const IDLE_AND_ALERT = `JSON.stringify([
+    Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /idle/.test(d.className)),
+    document.getElementById('alert-text').textContent])`;
+  check('the bar says nothing at all while the channel is merely not live',
+    await until(`${IDLE_AND_ALERT} === '[true,""]'`, 15000), await q(IDLE_AND_ALERT));
+  await wait(5000);
+  check('and it draws nothing, rather than reappearing on the next re-check',
+    !(await q(ALERT_PAINTED)), await q(ALERT_TEXT));
+
   check('the other two carry on throughout',
     await until(`JSON.parse(${DOTS}).filter((c) => c.includes('online')).length >= 2`, 20000),
     await q(DOTS));

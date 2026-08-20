@@ -30,10 +30,23 @@ export interface RemoveRequest {
   platform?: PlatformName;
   channel?: string;
   user?: string;
+  /**
+   * The platform's own id for the author, where it has one that is unique.
+   * YouTube's display names are not, so a ban that named one would remove the
+   * messages of anyone else using the same name.
+   */
+  userId?: string;
   all?: boolean;
 }
 
-export type ConnectionState = 'connecting' | 'online' | 'offline' | 'error';
+/**
+ * `idle` is the state that is neither working nor broken: connected to a
+ * channel that simply has nothing to carry — a YouTube channel that is not
+ * streaming, which is where most channels are most of the time. It is kept
+ * apart from `offline` because the bar draws only what is wrong, and this is
+ * not wrong.
+ */
+export type ConnectionState = 'connecting' | 'online' | 'offline' | 'error' | 'idle';
 
 /** The bits of a WebSocket the sources actually use, so tests can supply a fake. */
 export interface SocketLike {

@@ -169,6 +169,11 @@ body:not(.locked).pointer-over .src-list { opacity: 1; }
    the same red the alert uses when nothing is getting through. */
 .src-dot.error,
 .src-dot.offline { background: #f85149; }
+/* Connected to a channel with nothing to carry — a YouTube channel that is not
+   streaming. Neither green nor red, because it is neither: the same dim grey a
+   row that was never switched on is drawn in, which is what "nothing is
+   happening here, and nothing is wrong" looks like. */
+.src-dot.idle { background: var(--ui-dim); }
 .src-name {
   overflow: hidden;
   text-overflow: ellipsis;

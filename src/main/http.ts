@@ -7,7 +7,8 @@ import { rewriteApiUrl } from './endpoints.js';
  * Content-Security-Policy that names only the two chat sockets — so everything
  * else goes through here. That makes this list the whole outbound surface of
  * the app, which is why the check lives in one function that every handler
- * calls rather than being repeated per endpoint.
+ * calls rather than being repeated per endpoint — and why a redirect off it is
+ * refused rather than followed; see outbound().
  */
 export const ALLOWED_HOSTS = new Set([
   'goodgame.ru',
@@ -77,6 +78,64 @@ export const CONSENT_COOKIE = { name: 'SOCS', value: 'CAI' };
 export function consentCookies(testBase?: string | null): Array<{ url: string; name: string; value: string }> {
   const urls = ['https://www.youtube.com', ...(testBase ? [testBase] : [])];
   return urls.map((url) => ({ url, ...CONSENT_COOKIE }));
+}
+
+/**
+ * How long a request may go on before it is abandoned.
+ *
+ * Nothing else bounds one. A response that opens and then trickles nothing — a
+ * captive portal, a proxy, a half-open NAT — leaves the promise pending for
+ * ever, and a source that awaited it sits in `connecting` with no watchdog, no
+ * retry and no poll armed: wedged until the user toggles the row. Chromium will
+ * usually error such a socket eventually, but "usually" is not a guarantee, and
+ * this is the only place one can be written down.
+ *
+ * Comfortably longer than any of these endpoints takes, including YouTube's
+ * megabyte-and-a-bit pages on a slow line, and comfortably shorter than the
+ * liveness watchdog that is waiting on the answer.
+ */
+export const REQUEST_TIMEOUT_MS = 30000;
+
+/** A request the main process is prepared to make, url and options together. */
+export interface Outbound {
+  url: string;
+  init: {
+    method?: string;
+    headers: Record<string, string>;
+    body?: string;
+    redirect: 'error';
+    signal: AbortSignal;
+  };
+}
+
+/**
+ * Everything about one outbound request, decided in one place.
+ *
+ * The allowlist is only the whole outbound surface if it is checked against the
+ * url that is actually fetched, and `net.fetch` follows redirects by default: a
+ * 30x from an allowed host would carry the request — and this session's cookie
+ * jar with it — to a host nobody allowed, and hand the body back to the
+ * renderer as if it had come from the allowed one. None of the eight hosts
+ * redirects any path this app asks for, measured against all of them, so a
+ * redirect is not something to follow carefully. It is something that has
+ * changed, and it fails here rather than quietly off the list.
+ */
+export function outbound(
+  url: string,
+  accept: Record<string, string>,
+  testBase?: string | null,
+  post?: { body: unknown },
+): Outbound {
+  const target = allowedUrl(url, testBase);
+  return {
+    url: target,
+    init: {
+      ...(post ? { method: 'POST', body: JSON.stringify(post.body ?? {}) } : {}),
+      headers: requestHeaders(url, accept),
+      redirect: 'error',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+  };
 }
 
 /**

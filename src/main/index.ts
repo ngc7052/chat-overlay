@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { activeSources, defaultConfig, parseConfig } from './config.js';
 import { resolveEndpoints } from './endpoints.js';
-import { allowedUrl, consentCookies, requestHeaders } from './http.js';
+import { consentCookies, outbound } from './http.js';
 import type { Config, PayloadHandoff, ReleaseInfo } from './types.js';
 import { watchPointer } from './pointer.js';
 import { createUpdater } from './updater/index.js';
@@ -392,19 +392,18 @@ ipcMain.handle('env:endpoints', () => resolveEndpoints(process.env));
 
 /**
  * HTTP performed in the main process so the renderer never hits CORS and needs
- * no relaxed web security. Every one of these goes through `allowedUrl`, which
- * is the app's entire outbound surface — see src/main/http.ts.
+ * no relaxed web security. Every one of these goes through `outbound`, which
+ * checks the app's entire outbound surface — the host allowlist, the headers,
+ * the refusal to follow a redirect off it, and the timeout that bounds a
+ * request nothing else would ever end. See src/main/http.ts.
  */
-function request(url: string, accept: Record<string, string>) {
-  return {
-    url: allowedUrl(url, process.env['OVERLAY_TEST_API_BASE']),
-    headers: requestHeaders(url, accept),
-  };
+function request(url: string, accept: Record<string, string>, post?: { body: unknown }) {
+  return outbound(url, accept, process.env['OVERLAY_TEST_API_BASE'], post);
 }
 
 ipcMain.handle('http:json', async (_e, url: string) => {
   const req = request(url, { Accept: 'application/json' });
-  const res = await net.fetch(req.url, { headers: req.headers });
+  const res = await net.fetch(req.url, req.init as RequestInit);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 });
@@ -415,7 +414,7 @@ ipcMain.handle('http:json', async (_e, url: string) => {
  */
 ipcMain.handle('http:text', async (_e, url: string) => {
   const req = request(url, { Accept: 'text/html', 'Accept-Language': 'en-US,en;q=0.9' });
-  const res = await net.fetch(req.url, { headers: req.headers });
+  const res = await net.fetch(req.url, req.init as RequestInit);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.text();
 });
@@ -426,12 +425,8 @@ ipcMain.handle('http:text', async (_e, url: string) => {
  * reading YouTube chat anonymous in the same way the two sockets are.
  */
 ipcMain.handle('http:post', async (_e, url: string, body: unknown) => {
-  const req = request(url, { 'Content-Type': 'application/json', Accept: 'application/json' });
-  const res = await net.fetch(req.url, {
-    method: 'POST',
-    headers: req.headers,
-    body: JSON.stringify(body ?? {}),
-  });
+  const req = request(url, { 'Content-Type': 'application/json', Accept: 'application/json' }, { body });
+  const res = await net.fetch(req.url, req.init as RequestInit);
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
 });

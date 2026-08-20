@@ -363,7 +363,7 @@ describe('a channel that is not live', () => {
     const h = harness({ pages: { '/live': livePage(null) } });
     await h.source.connect();
 
-    expect(h.statuses.at(-1)).toEqual({ state: 'offline', detail: 'not live' });
+    expect(h.statuses.at(-1)).toEqual({ state: 'idle', detail: 'not live' });
     expect(h.system()).toEqual(['not live — youtube/somechannel']);
     // On the slow cadence, not the connection backoff — this is normal, and the
     // page that answers the question is over a megabyte.
@@ -377,14 +377,14 @@ describe('a channel that is not live', () => {
   it('reads a live video whose chat is switched off the same way', async () => {
     const h = harness({ pages: { '/live': livePage('rFZHOHl-L8A'), '/live_chat': NO_CHAT } });
     await h.source.connect();
-    expect(h.statuses.at(-1)).toEqual({ state: 'offline', detail: 'not live' });
+    expect(h.statuses.at(-1)).toEqual({ state: 'idle', detail: 'not live' });
   });
 
   it('connects by itself once the channel goes live, with nobody pressing anything', async () => {
     const pages: Record<string, string> = { '/live': livePage(null) };
     const h = harness({ pages, polls: [frame([chatItem('we are live')], 'N1')] });
     await h.source.connect();
-    expect(h.statuses.at(-1)?.state).toBe('offline');
+    expect(h.statuses.at(-1)?.state).toBe('idle');
 
     pages['/live'] = livePage('rFZHOHl-L8A');
     pages['/live_chat'] = chatPage();
@@ -437,18 +437,20 @@ describe('polling', () => {
     await h.source.connect();
     await h.advance(1);
     expect(h.removals[0]).toEqual({ ids: ['youtube:somechannel:gone'] });
-    // The ban names a channel id; the login is remembered from the message.
-    expect(h.removals[1]).toEqual({ platform: 'youtube', channel: 'somechannel', user: 'viewer' });
+    // By channel id, which is the only thing about a YouTube author that is
+    // unique: display names are freely reusable, and a troll who copies a
+    // regular's name would otherwise take the regular's messages down too.
+    expect(h.removals[1]).toEqual({ platform: 'youtube', channel: 'somechannel', userId: 'UCabc' });
   });
 
-  it('has nothing to say about an author it never rendered', async () => {
+  it('names an author it never rendered by id, so nothing on screen can match it', async () => {
     const h = harness({
       pages: livePages(),
       polls: [frame([{ removeChatItemByAuthorAction: { externalChannelId: 'UCnever' } }], 'N1')],
     });
     await h.source.connect();
     await h.advance(1);
-    expect(h.removals[0]).toEqual({ platform: 'youtube', channel: 'somechannel', user: '' });
+    expect(h.removals[0]).toEqual({ platform: 'youtube', channel: 'somechannel', userId: 'UCnever' });
   });
 
   /**
@@ -495,6 +497,93 @@ describe('polling', () => {
     // Re-resolved rather than kept polling a token that will never advance.
     expect(h.fetched.filter((u) => u.includes('/live_chat'))).toHaveLength(2);
     expect(h.statuses.filter((s) => s.state === 'online')).toHaveLength(2);
+    // Invisible plumbing: the chat never went away, so the feed does not say
+    // "connected" a second time for one continuous session.
+    expect(h.system()).toEqual(['connected — youtube/somechannel']);
+  });
+
+  /**
+   * The same answer twice is not a stale token, it is a chat that cannot be
+   * followed — and re-resolving it on the spot re-downloads two pages, one of
+   * them over a megabyte, as fast as the network will answer.
+   */
+  it('does not hammer the pages when the token comes back stale again and again', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([], 'N1', 'reloadContinuationData')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    // One immediate re-resolve, then the connection backoff like any other
+    // disconnect — not a page fetch per network round trip.
+    expect(h.fetched.length).toBeLessThanOrEqual(4);
+
+    await h.advance(300000);
+    expect(h.fetched.length).toBeLessThan(40);
+    // And it says so once, rather than filling the feed with the news.
+    expect(h.system().filter((s) => s.startsWith('lost —'))).toHaveLength(1);
+    expect(h.system().filter((s) => s.startsWith('connected —'))).toHaveLength(1);
+  });
+
+  it('backs off further the longer the token keeps coming back stale', async () => {
+    const h = harness({ pages: livePages(), polls: [frame([], 'N1', 'reloadContinuationData')] });
+    await h.source.connect();
+    await h.advance(60000);
+    const early = h.fetched.length;
+    await h.advance(60000);
+    // The second minute costs fewer page fetches than the first: the curve is
+    // climbing rather than sitting at one interval.
+    expect(h.fetched.length - early).toBeLessThan(early);
+  });
+
+  it('says so, and says it again, when a stale chat comes back', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [
+        frame([], 'N1', 'reloadContinuationData'),
+        frame([], 'N1', 'reloadContinuationData'),
+        frame([chatItem('back')], 'N2'),
+      ],
+    });
+    await h.source.connect();
+    await h.advance(60000);
+    expect(h.text()).toContain('back');
+    expect(h.system()).toEqual([
+      'connected — youtube/somechannel',
+      'lost — youtube/somechannel',
+      'connected — youtube/somechannel',
+    ]);
+  });
+
+  /**
+   * Every connect re-reads the chat page, which carries the last few minutes of
+   * chat with it. Replaying that is a handful of messages the user has already
+   * read reappearing at the bottom of the feed, minutes out of order.
+   */
+  it('does not replay the page backlog when it picks the chat up again', async () => {
+    const h = harness({
+      pages: livePages('rFZHOHl-L8A', { actions: [chatItem('earlier'), chatItem('older')] }),
+      polls: [frame([], 'N1', 'reloadContinuationData'), frame([chatItem('new')], 'N2')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    expect(h.text().filter((s) => s === 'earlier')).toHaveLength(1);
+    expect(h.text().filter((s) => s === 'older')).toHaveLength(1);
+    expect(h.text()).toContain('new');
+  });
+
+  it('remembers only a bounded number of messages, however long it runs', async () => {
+    const many = (from: number) => Array.from({ length: 300 }, (_, i) => chatItem('m' + (from + i)));
+    const h = harness({
+      pages: livePages(),
+      polls: [frame(many(0), 'N1'), frame(many(300), 'N2'), frame(many(600), 'N3'),
+        frame([chatItem('m0')], 'N4')],
+    });
+    await h.source.connect();
+    await h.advance(60000);
+    // 900 messages later the oldest ids are gone, so an id that old is new
+    // again — which is the price of not growing without limit.
+    expect(h.text().filter((s) => s === 'm0')).toHaveLength(2);
   });
 
   /**
@@ -533,7 +622,9 @@ describe('polling', () => {
     await h.advance(1);
     // There was no chat to lose, so this is the ordinary "not live" state.
     expect(h.system()).toEqual(['connected — youtube/somechannel', 'not live — youtube/somechannel']);
-    expect(h.statuses.at(-1)).toEqual({ state: 'offline', detail: 'not live' });
+    expect(h.statuses.at(-1)).toEqual({ state: 'idle', detail: 'not live' });
+    // Not a failure and not painted as one: the bar draws only exceptions, and
+    // most channels are not live most of the time.
 
     const tries = h.fetched.length;
     await h.advance(30000);
@@ -579,14 +670,70 @@ describe('the liveness watchdog', () => {
     await h.advance(1);
     const statusesBefore = h.statuses.length;
 
-    await h.advance(YT_IDLE_MS);
+    // Two short of the idle mark, because advance() is relative and one
+    // millisecond has already gone by.
+    await h.advance(YT_IDLE_MS - 2);
     expect(h.statuses.slice(statusesBefore).map((s) => s.state)).not.toContain('offline');
     const probes = h.posted.length;
+    // The watchdog's own question, asked at the idle mark rather than a
+    // scheduled poll that happened to be due: probe() clears whatever was
+    // pending first, so this is one request and not two.
+    await h.advance(2);
+    expect(h.posted.length).toBe(probes + 1);
 
-    await h.advance(PROBE_GRACE_MS + 1);
-    expect(h.posted.length).toBeGreaterThan(probes);
+    await h.advance(PROBE_GRACE_MS);
     expect(h.statuses.at(-2)).toEqual({ state: 'offline', detail: 'no reply — reconnecting' });
     expect(h.system()).toContain('no reply — reconnecting youtube/somechannel');
+  });
+
+  it('stops polling the moment it gives up on the connection', async () => {
+    const h = harness({ pages: livePages(), polls: [frame([], 'N1'), new Error('gone')] });
+    await h.source.connect();
+    await h.advance(YT_IDLE_MS + PROBE_GRACE_MS + 1);
+    expect(h.system()).toContain('no reply — reconnecting youtube/somechannel');
+    // It has just told the user this connection is dead. The polls it had
+    // queued have to die with it, or they arrive after the funeral — deliver
+    // messages while the bar says offline, and re-arm the watchdog on a source
+    // the app has already given up on.
+    expect(h.timers()).toHaveLength(1);
+  });
+
+  it('throws away a poll that was still in flight when it gave up', async () => {
+    const held: Array<(value: unknown) => void> = [];
+    let posts = 0;
+    const h = harness({
+      pages: livePages(),
+      httpPost: async () => {
+        posts += 1;
+        return new Promise((resolve) => { held.push(resolve); });
+      },
+    });
+    await h.source.connect();
+    await h.advance(YT_IDLE_MS + PROBE_GRACE_MS + 1);
+    expect(h.system()).toContain('no reply — reconnecting youtube/somechannel');
+
+    const inFlight = posts;
+    held.forEach((resolve) => resolve(frame([chatItem('from the grave')], 'N2')));
+    await h.settle();
+    expect(h.text()).not.toContain('from the grave');
+    expect(posts).toBe(inFlight);
+    expect(h.timers()).toHaveLength(1);
+  });
+
+  /**
+   * A poll answered with 429 or 500 is not a blip, and answering it at the
+   * cadence of a healthy chat is how a client earns a longer ban than the one
+   * it already has.
+   */
+  it('slows down while every poll is failing, rather than keeping the pace', async () => {
+    let posts = 0;
+    const h = harness({
+      pages: livePages(),
+      httpPost: async () => { posts += 1; throw new Error('HTTP 429'); },
+    });
+    await h.source.connect();
+    await h.advance(YT_IDLE_MS - 1);
+    expect(posts).toBeLessThanOrEqual(5);
   });
 
   it('keeps trying quietly while a poll is merely failing', async () => {
@@ -624,6 +771,25 @@ describe('destroy', () => {
     await h.advance(YT_NOT_LIVE_MS * 2);
     expect(h.posted.length).toBe(before);
     expect(h.timers()).toHaveLength(0);
+  });
+
+  it('does not wedge when a reconnect throws on its way out', async () => {
+    // connect() is async here, so a throw after the try block is a rejected
+    // promise nobody holds — and BaseSource's retry timer holds nothing.
+    let boom = false;
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([], 'N1'), frame([], null)],
+      onMessage: () => { if (boom) throw new Error('renderer blew up'); },
+    });
+    await h.source.connect();
+    await h.advance(20000);
+    expect(h.statuses.at(-1)?.state).toBe('idle');
+
+    boom = true;
+    await h.advance(YT_NOT_LIVE_MS + 1);
+    expect(h.statuses.map((s) => s.detail)).toContain('renderer blew up');
+    expect(h.timers().length).toBeGreaterThan(0);
   });
 
   it('leaves a connect already in flight with nothing to do', async () => {

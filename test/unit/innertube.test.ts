@@ -60,6 +60,20 @@ describe('jsonAfter', () => {
     expect(jsonAfter('x = {"a":{"b":{"c":1}}};', 'x')).toEqual({ a: { b: { c: 1 } } });
   });
 
+  /**
+   * The marker is a string like `ytInitialData`, and a page a megabyte long
+   * mentions it more than once — a guard, a comment, an inlined third-party
+   * script. Taking the first occurrence and giving up when it does not parse
+   * turns the channel into a permanent, silent "not live": the exact invisible
+   * failure the two known YouTube gates already taught this file about.
+   */
+  it('walks past a mention of the marker that is not the data', () => {
+    expect(jsonAfter('if (window.ytInitialData) {}; var ytInitialData = {"a":1};', 'ytInitialData'))
+      .toEqual({ a: 1 });
+    expect(jsonAfter('ytInitialData = {oops}; ytInitialData = {"a":2};', 'ytInitialData'))
+      .toEqual({ a: 2 });
+  });
+
   it('gives up quietly on anything it cannot read', () => {
     expect(jsonAfter('nothing here', 'ytInitialData')).toBeNull();
     expect(jsonAfter('ytInitialData = no brace', 'ytInitialData')).toBeNull();

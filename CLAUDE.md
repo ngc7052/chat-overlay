@@ -192,12 +192,17 @@ Read-only and anonymous on both; the app never sees a password.
 | Twitch chat | `wss://irc-ws.chat.twitch.tv:443` — IRC with tags, anonymous `justinfan` nick |
 | Twitch emotes | inline `emotes` tag, plus 7TV / BetterTTV / FrankerFaceZ |
 | Twitch badges | IVR public mirror; artwork itself is on Twitch's own CDN |
-| YouTube live chat | `www.youtube.com/youtubei/v1/live_chat/get_live_chat` — **not** a socket; a JSON POST polled at the interval the server itself names. No key, no cookie, no account |
+| YouTube live chat | `www.youtube.com/youtubei/v1/live_chat/get_live_chat` — **not** a socket; a JSON POST polled at the interval the server itself names. No key and no account; the one cookie that goes with it is Google's consent flag, which is not a credential |
 | YouTube stream lookup | `youtube.com/<channel>/live`, then `youtube.com/live_chat?v=<id>` for the continuation token and client version |
 | YouTube emotes & badges | inline on the message — no catalogue, no lookup, no cache |
 
 HTTP goes through the main process against a host allowlist, so the renderer
-never needs relaxed web security. The renderer has no Node integration.
+never needs relaxed web security. The renderer has no Node integration. The
+allowlist is only the whole outbound surface if it is checked against the url
+that is actually fetched, so requests are made with `redirect: 'error'`: none of
+these endpoints redirects any path the app asks for, and a 30x would otherwise
+leave the list carrying the session's cookie jar. Every request is also bounded
+by `REQUEST_TIMEOUT_MS` — nothing else is.
 
 ## How updating works
 
@@ -271,6 +276,28 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   potential spam, may not be visible". An overlay that silently drops messages
   looks exactly like one that works. Both titles arrive translated, so it is
   chosen by position.
+- **"Not live" is `idle`, not `offline`.** The bar draws only what is wrong,
+  and a channel that is not streaming is not wrong — it is where most channels
+  are most of the time. `barAlert` counts only the channels that ought to be
+  carrying chat, so a YouTube row that is merely not live never puts "1 of 2
+  offline" over somebody's game for the five evenings a week they do not stream.
+- **A repeated stale token is a lost connection, not a retry.** One
+  `reloadContinuationData` answer is ordinary and re-resolves at once, silently.
+  A second in a row means the token just fetched was spent too, and re-fetching
+  on the spot is a loop over two pages — one of them over a megabyte — as fast
+  as the network answers, writing a "connected" line into the feed each time. So
+  it says "lost" once and takes the ordinary backoff, and only a poll that
+  *advances* zeroes that curve: a chat that cannot be followed still resolves
+  its pages perfectly, so a page that loaded proves nothing.
+- **Every reconnect re-reads the chat page, and the page carries a backlog.**
+  Remember which message ids have been rendered (bounded — `YT_SEEN_MAX`), or a
+  stale token or a watchdog reconnect replays minutes-old chat at the bottom of
+  the feed. The renderer's own de-dup only knows what is still in the DOM.
+- **A removal names the platform's unique id where there is one.** YouTube bans
+  arrive as `externalChannelId`, and display names there are freely reusable —
+  matching by name takes the impersonated regular's messages down along with the
+  impersonator. Same class of bug as a ban leaking across channels, which 1.3.0
+  fixed.
 - **Parse one YouTube renderer type and ignore every other action in silence.**
   YouTube is mid-migration from `…Renderer` to `…ViewModel` names across
   superchats and membership gifts. Switching exhaustively turns every type they

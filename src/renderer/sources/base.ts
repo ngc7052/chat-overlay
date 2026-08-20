@@ -202,7 +202,31 @@ export abstract class BaseSource {
     const total = wait + jitter;
     this.status('connecting', `retry in ${Math.round(total / 1000)}s`);
     this.clearTimeoutFn(this.retryTimer);
-    this.retryTimer = this.setTimeoutFn(() => this.connect(), total);
+    this.retryTimer = this.setTimeoutFn(() => this.reconnect(), total);
+  }
+
+  /**
+   * Run connect() from a timer, where nobody is awaiting it.
+   *
+   * A timer callback holds nothing: a synchronous throw is an uncaught error
+   * inside it, and — since connect() may be async, YouTube's is — a rejected
+   * promise is an unhandled rejection that no user, log or test ever sees.
+   * Either way the source is left with no timer armed at all, wedged until the
+   * row is toggled off and on. A connect that failed is a connect that failed,
+   * so it goes out through the same door as one that failed politely.
+   */
+  protected reconnect(): void {
+    try {
+      const started = this.connect();
+      if (started) started.catch((err: unknown) => this.connectFailed(err));
+    } catch (err) {
+      this.connectFailed(err);
+    }
+  }
+
+  private connectFailed(err: unknown): void {
+    this.status('error', (err as Error).message);
+    this.scheduleRetry();
   }
 
   protected closeSocket(): void {

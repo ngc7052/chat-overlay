@@ -68,6 +68,23 @@ describe('normaliseConfig', () => {
     expect(c.sources).toEqual([{ platform: 'twitch', channel: 'ok', enabled: true }]);
   });
 
+  /**
+   * `isSource` was widened for YouTube, and nothing else in the suite pins it:
+   * a row the app can no longer load is a channel the user silently loses on
+   * the next save.
+   */
+  it('keeps a row for every platform the app can read', () => {
+    const c = normaliseConfig({
+      sources: [
+        { platform: 'twitch', channel: 'a', enabled: true },
+        { platform: 'goodgame', channel: 'b', enabled: true },
+        { platform: 'youtube', channel: '@c', enabled: true },
+      ],
+    });
+    expect(c.sources.map((s) => s.platform)).toEqual(['twitch', 'goodgame', 'youtube']);
+    expect(c.sources[2]).toEqual({ platform: 'youtube', channel: '@c', enabled: true });
+  });
+
   it('treats a source without an explicit flag as enabled', () => {
     const c = normaliseConfig({ sources: [{ platform: 'twitch', channel: 'x' }] });
     expect(c.sources[0]?.enabled).toBe(true);

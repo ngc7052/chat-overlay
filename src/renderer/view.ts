@@ -130,10 +130,17 @@ export interface BarAlert {
  */
 export function barAlert(dots: StatusDot[]): BarAlert {
   const title = dots.map((d) => d.title).join('\n');
-  const off = dots.filter((d) => d.state !== 'online');
+  // A channel that is not live is not a channel that has stopped: it is the
+  // resting state of most channels most of the time, and counting it as a
+  // failure would leave a permanent alert over the game for the ordinary case.
+  // It is excluded from the *judgement* but not from the count, because the
+  // count is about the row the user is looking at: "1 of 3 offline" with three
+  // channels configured, never "1 of 2".
+  const carrying = dots.filter((d) => d.state !== 'idle');
+  const off = carrying.filter((d) => d.state !== 'online');
   // An empty channel list is legitimate — the hint in the chat body covers it.
-  if (dots.length === 0 || off.length === 0) return { level: 'ok', text: '', title };
-  if (off.length < dots.length) {
+  if (off.length === 0) return { level: 'ok', text: '', title };
+  if (off.length < carrying.length) {
     return { level: 'warn', text: `${off.length} of ${dots.length} offline`, title };
   }
   return { level: 'down', text: dots.length === 1 ? 'offline' : 'all channels offline', title };
@@ -159,8 +166,8 @@ export function sourceDotClass(src: SourceConfig | undefined, status: SourceStat
 
 /** Which messages a removal request targets, given the rendered set. */
 export function messagesToRemove(
-  req: { ids?: string[]; platform?: string; channel?: string; user?: string; all?: boolean },
-  rendered: { id: string; platform: string; channel: string; user: string }[],
+  req: { ids?: string[]; platform?: string; channel?: string; user?: string; userId?: string; all?: boolean },
+  rendered: { id: string; platform: string; channel: string; user: string; userId?: string }[],
 ): string[] {
   if (req.ids) return req.ids;
   // Moderation belongs to the channel it happened in. The same person can be
@@ -170,6 +177,10 @@ export function messagesToRemove(
     m.platform === req.platform && m.channel === req.channel;
   return rendered.filter((m) => {
     if (req.all) return sameChannel(m);
+    // By the platform's own id where there is one, because a name is not
+    // always the person: on YouTube display names are reusable, so a ban
+    // matched by name takes the impersonated regular down with the troll.
+    if (req.userId) return sameChannel(m) && m.userId === req.userId;
     if (req.user) return sameChannel(m) && m.user === req.user;
     return false;
   }).map((m) => m.id);

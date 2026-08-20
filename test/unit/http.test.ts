@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  ALLOWED_HOSTS, allowedUrl, consentCookies, requestHeaders, USER_AGENT,
+  ALLOWED_HOSTS, allowedUrl, consentCookies, outbound, REQUEST_TIMEOUT_MS, requestHeaders,
+  USER_AGENT,
 } from '../../src/main/http.js';
 
 /**
@@ -8,6 +9,28 @@ import {
  * anything not permitted here cannot be reached at all — which is why the check
  * is one function rather than a copy per handler.
  */
+
+describe('ALLOWED_HOSTS', () => {
+  /**
+   * Written out rather than iterated. A loop over the set under test asserts
+   * only that its own members are members: delete a host and the loop simply
+   * stops testing it, so the one list that decides what the app can reach
+   * would have no test at all. This list is the expectation; changing it is a
+   * decision, and a decision belongs in a diff.
+   */
+  it('is exactly the hosts the three sources need', () => {
+    expect([...ALLOWED_HOSTS].sort()).toEqual([
+      '7tv.io',
+      'api.betterttv.net',
+      'api.frankerfacez.com',
+      'api.ivr.fi',
+      'api2.goodgame.ru',
+      'goodgame.ru',
+      'static.goodgame.ru',
+      'www.youtube.com',
+    ]);
+  });
+});
 
 describe('allowedUrl', () => {
   it('passes the hosts the sources actually need', () => {
@@ -108,5 +131,58 @@ describe('consentCookies', () => {
       { url: 'https://www.youtube.com', name: 'SOCS', value: 'CAI' },
       { url: 'http://127.0.0.1:8080', name: 'SOCS', value: 'CAI' },
     ]);
+  });
+});
+
+/**
+ * The allowlist is only the whole outbound surface if it is checked on the url
+ * that is actually fetched. `net.fetch` follows redirects by default, and a
+ * 30x from an allowed host would carry the request — and the session's cookie
+ * jar with it — to a host nobody allowed, with the body handed back to the
+ * renderer as if it had come from the allowed one.
+ *
+ * None of the eight hosts redirects any of the paths this app asks for
+ * (measured against all of them). So a redirect is not something to follow
+ * carefully; it is something that has changed, and it fails loudly here rather
+ * than quietly off the list.
+ */
+describe('outbound', () => {
+  const init = (url: string) => outbound(url, { Accept: 'text/html' }).init;
+
+  it('refuses to follow a redirect off the allowlist', () => {
+    expect(init('https://www.youtube.com/live_chat').redirect).toBe('error');
+    expect(outbound('https://7tv.io/v3/x', {}, null, { body: { a: 1 } }).init.redirect).toBe('error');
+  });
+
+  /**
+   * A response that opens and then trickles nothing — a captive portal, a
+   * half-open NAT — leaves the promise pending for ever, and the source that
+   * awaited it sits in `connecting` with no watchdog and no timer of its own.
+   */
+  it('gives up on a request that never finishes', () => {
+    const signal = init('https://www.youtube.com/live_chat').signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal.aborted).toBe(false);
+    expect(REQUEST_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
+  it('checks the host before it builds anything at all', () => {
+    expect(() => outbound('https://elsewhere.test/x', {})).toThrow(/host not allowed/);
+    expect(() => outbound('not a url', {})).toThrow('bad url');
+  });
+
+  it('carries the headers and the test override the app already decided on', () => {
+    const req = outbound('https://goodgame.ru/api/4/smiles', { Accept: 'application/json' }, 'http://127.0.0.1:8080');
+    expect(req.url).toBe('http://127.0.0.1:8080/api/4/smiles');
+    expect(req.init.headers).toEqual({ Accept: 'application/json', 'User-Agent': USER_AGENT });
+    expect(req.init.method).toBeUndefined();
+    expect(req.init.body).toBeUndefined();
+  });
+
+  it('serialises a post body, and sends an empty object rather than nothing', () => {
+    expect(outbound('https://www.youtube.com/youtubei/v1/live_chat/get_live_chat', {}, null,
+      { body: { continuation: 'ALL' } }).init)
+      .toMatchObject({ method: 'POST', body: '{"continuation":"ALL"}' });
+    expect(outbound('https://www.youtube.com/x', {}, null, { body: undefined }).init.body).toBe('{}');
   });
 });

@@ -202,6 +202,8 @@ function addMessage(msg: ChatMessage): void {
   el.className = 'msg' + (msg.kind === 'system' ? ' system' : '') +
     (msg.kind === 'event' ? ' event' : '') + (msg.action ? ' action' : '');
   el.dataset['user'] = msg.userLogin || '';
+  // The unique one where the platform has one; a removal by author prefers it.
+  el.dataset['userid'] = msg.userId || '';
   el.dataset['platform'] = msg.platform;
   el.dataset['channel'] = msg.channel || '';
 
@@ -299,6 +301,7 @@ function handleRemove(req: RemoveRequest): void {
     platform: entry.el.dataset['platform'] ?? '',
     channel: entry.el.dataset['channel'] ?? '',
     user: entry.el.dataset['user'] ?? '',
+    userId: entry.el.dataset['userid'] ?? '',
   }));
   messagesToRemove(req, rendered).forEach(removeMessage);
 }
@@ -394,7 +397,9 @@ function rebuildSources(): void {
     if (!cfgSrc.enabled || !cfgSrc.channel) continue;
     const opts = {
       channel: cfgSrc.channel.trim(),
-      wsUrl: cfgSrc.platform === 'twitch' ? endpoints.twitchWs : endpoints.goodgameWs,
+      // YouTube has no socket to point anywhere; the other two are named here.
+      wsUrl: cfgSrc.platform === 'twitch' ? endpoints.twitchWs
+        : cfgSrc.platform === 'youtube' ? null : endpoints.goodgameWs,
       iconBase: endpoints.ggIconBase,
       channelIconBase: endpoints.ggChannelIconBase,
       emoteBase: endpoints.twitchEmoteBase,

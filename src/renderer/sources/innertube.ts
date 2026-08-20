@@ -3,7 +3,9 @@
  *
  * YouTube publishes no chat socket and no anonymous chat API. What it does have
  * is `youtubei/v1/live_chat/get_live_chat`, which the browser itself polls, and
- * which answers an unauthenticated request: no account, no cookie, no API key.
+ * which answers an unauthenticated request: no account and no API key. The one
+ * cookie that goes with it is Google's consent flag, which is a "yes, I saw the
+ * banner" and not a credential — see CONSENT_COOKIE in main/http.ts.
  * That is the same posture as `justinfan` on Twitch, and it is why this file
  * exists rather than a YouTube Data API client — the official API needs a key
  * the user has to create in a Google Cloud console, and its default quota is
@@ -22,7 +24,7 @@ import { clamp } from '../../shared/clamp.js';
 
 export const YT_ORIGIN = 'https://www.youtube.com';
 
-/** The endpoint the browser polls. No key, no cookie — see the file comment. */
+/** The endpoint the browser polls. No key and no account — see the file comment. */
 export const YT_CHAT_POLL_URL = YT_ORIGIN + '/youtubei/v1/live_chat/get_live_chat?prettyPrint=false';
 
 /**
@@ -132,9 +134,20 @@ export function chatPageUrl(videoId: string): string {
  * fooled by the contents.
  */
 export function jsonAfter(text: string, marker: string): unknown {
-  const at = text.indexOf(marker);
-  if (at === -1) return null;
-  const start = text.indexOf('{', at);
+  for (let at = text.indexOf(marker); at !== -1; at = text.indexOf(marker, at + marker.length)) {
+    const found = objectAt(text, text.indexOf('{', at)) as Record<string, unknown> | null;
+    // Keep looking past anything that is not it. The first mention of the
+    // marker on a megabyte-long page is not necessarily the data — a guard, a
+    // comment, an inlined third-party script — and taking it turns the channel
+    // into a permanent, silent "not live", the same invisible failure as the
+    // two YouTube gates. An empty object is no more the data than a broken one.
+    if (found && Object.keys(found).length > 0) return found;
+  }
+  return null;
+}
+
+/** The object starting at `start`, or null if there is none that parses. */
+function objectAt(text: string, start: number): unknown {
   if (start === -1) return null;
 
   let depth = 0;

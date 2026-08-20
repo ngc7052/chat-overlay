@@ -3,7 +3,7 @@ import { nickColor, splitUrls, type MessagePart } from '../util.js';
 import { BaseSource } from './base.js';
 import {
   chatPageActions, chatPageUrl, chatStart, chatTarget, clientVersion, livePageUrl,
-  parsePoll, pollBody, videoIdFromLivePage, YT_CHAT_POLL_URL, YT_POLL_MS,
+  parsePoll, pollBody, videoIdFromLivePage, YT_CHAT_POLL_URL, YT_POLL_MAX_MS, YT_POLL_MS,
 } from './innertube.js';
 import type { Badge, ChatMessage, SourceOptions } from './types.js';
 
@@ -15,8 +15,10 @@ import type { Badge, ChatMessage, SourceOptions } from './types.js';
  * of this class follows from. What it is *not* is a different kind of source:
  * retries, status reporting, the lines the feed shows and the liveness watchdog
  * are all BaseSource's, unchanged, because none of them was ever about sockets.
- * `this.ws` simply stays null, and `send`/`closeSocket` already do nothing when
- * it is.
+ * `this.ws` simply stays null, and `send` already does nothing when it is.
+ * `closeSocket` is not nothing, though: it is BaseSource saying "this
+ * connection is over", which for a poller means the watchdog *and* the poll
+ * loop — see the override below.
  *
  * The other difference is that a YouTube channel is not an address. It is a
  * stream that starts, ends and gets replaced, so "connected" here means "this
@@ -46,6 +48,17 @@ export const YT_IDLE_MS = 60000;
  * cheap and early enough that a stream is caught near its start.
  */
 export const YT_NOT_LIVE_MS = 120000;
+
+/**
+ * How many message ids are remembered, so a reconnect does not replay chat.
+ *
+ * Every connect re-reads the chat page, and the page carries the last few
+ * minutes of chat inside it. Bounded rather than complete because this runs for
+ * hours: a busy stream is thousands of messages an evening, and a repeat older
+ * than this could not be a duplicate of anything still on screen — the feed
+ * itself holds far fewer than this.
+ */
+export const YT_SEEN_MAX = 400;
 
 /**
  * The badges the protocol names by icon rather than by artwork.
@@ -160,11 +173,21 @@ export class YouTubeSource extends BaseSource {
   private followed = 0;
   /** So a channel that is offline all evening says so once, not every two minutes. */
   private saidNotLive = false;
+  /** Consecutive polls answered with a spent token; see tokenStale(). */
+  private staleReloads = 0;
+  /** Consecutive polls that never came back at all; see poll(). */
+  private failures = 0;
   /**
-   * Author channel id -> the login the feed rendered, kept as messages go past:
-   * a ban names the author by channel id, and nothing on screen remembers it.
+   * Which poll loop is the current one.
+   *
+   * A request in flight belongs to the connection that asked for it. When that
+   * connection is let go of — the watchdog gave up, the token went stale,
+   * destroy() — the answer must not be allowed to arrive afterwards and start
+   * everything up again.
    */
-  private readonly logins = new Map<string, string>();
+  private pollEpoch = 0;
+  /** Message ids already rendered, oldest first; see remember(). */
+  private readonly seen = new Set<string>();
   private readonly notLiveMs: number;
   private readonly httpText: NonNullable<SourceOptions['httpText']>;
   private readonly httpPost: NonNullable<SourceOptions['httpPost']>;
@@ -218,12 +241,15 @@ export class YouTubeSource extends BaseSource {
       return;
     }
 
-    this.attempt = 0;
     this.saidNotLive = false;
     this.followed = 0;
+    this.failures = 0;
     this.pollMs = YT_POLL_MS;
     this.status('online');
-    this.system('connected — youtube/' + this.channel);
+    // Not on a stale-token retry: the chat never went away, so announcing it
+    // again would be a connection log written over one continuous session —
+    // and, in a loop, a feed of nothing else. tokenStale() has the other half.
+    if (this.staleReloads === 0) this.system('connected — youtube/' + this.channel);
     // Start the liveness clock here rather than on the first poll: a chat page
     // that resolves and then never answers a poll is exactly the case worth
     // catching.
@@ -243,14 +269,19 @@ export class YouTubeSource extends BaseSource {
   private notLive(): void {
     this.videoId = null;
     this.continuation = null;
-    this.status('offline', 'not live');
+    this.staleReloads = 0;
+    // Not `offline`: nothing is wrong, and the bar draws only what is wrong.
+    // Most channels are not streaming most of the time, so painting this as a
+    // failure would leave a permanent alert over the game for the ordinary
+    // case — which is the one thing the bar is designed never to do.
+    this.status('idle', 'not live');
     if (!this.saidNotLive) {
       this.saidNotLive = true;
       this.system(`not live — youtube/${this.channel}`);
     }
     this.clearWatchdog();
     this.clearTimeoutFn(this.retryTimer);
-    this.retryTimer = this.setTimeoutFn(() => void this.connect(), this.notLiveMs);
+    this.retryTimer = this.setTimeoutFn(() => this.reconnect(), this.notLiveMs);
   }
 
   /**
@@ -264,8 +295,17 @@ export class YouTubeSource extends BaseSource {
     this.pump(0);
   }
 
+  /**
+   * Arm the next poll, replacing whatever was pending.
+   *
+   * No guard against a destroyed source, because there is nothing left for one
+   * to catch: every caller has already established that this poll loop is the
+   * current one, and destroy() goes through stopPolling(), which both clears
+   * the timer and makes any answer still in flight arrive too late to re-arm
+   * anything. An unreachable guard is worse than none — it reads as a case
+   * somebody has seen.
+   */
   private pump(ms: number): void {
-    if (this.dead) return;
     this.clearTimeoutFn(this.pollTimer);
     this.pollTimer = this.setTimeoutFn(() => void this.poll(), ms);
   }
@@ -274,24 +314,73 @@ export class YouTubeSource extends BaseSource {
     this.clearTimeoutFn(this.pollTimer);
     this.pollTimer = null;
     this.busy = false;
+    this.pollEpoch += 1;
+  }
+
+  /**
+   * Let go of the transport — which here is a poll loop rather than a socket.
+   *
+   * BaseSource calls this wherever it means "this connection is over": the
+   * watchdog giving up, and destroy(). A socket source has nothing left to do
+   * afterwards, but a poller has a timer armed and possibly a request in
+   * flight, and without this they outlive the announcement — messages arriving
+   * after the feed has said the source is offline, and noteAlive() re-arming
+   * the watchdog on a connection the app has already given up on.
+   */
+  protected override closeSocket(): void {
+    this.stopPolling();
+    super.closeSocket();
+  }
+
+  /** Whether an answer belongs to a poll loop that has since been let go of. */
+  private outlived(epoch: number): boolean {
+    return this.dead || epoch !== this.pollEpoch;
+  }
+
+  /**
+   * Note a message id, and say whether it has not been seen before.
+   *
+   * The chat page carries the last few minutes of chat, so every reconnect
+   * offers the feed a backlog it has probably already rendered. The renderer's
+   * own de-dup only knows about messages still in the DOM, so anything faded or
+   * trimmed would come back at the bottom of the feed with a timestamp minutes
+   * old. Bounded; see YT_SEEN_MAX.
+   */
+  private remember(id: string): boolean {
+    if (this.seen.has(id)) return false;
+    this.seen.add(id);
+    if (this.seen.size > YT_SEEN_MAX) {
+      this.seen.delete(this.seen.values().next().value as string);
+    }
+    return true;
   }
 
   async poll(): Promise<void> {
     if (this.dead || this.busy || !this.continuation) return;
+    const epoch = this.pollEpoch;
     this.busy = true;
     let raw: unknown;
     try {
       raw = await this.httpPost(YT_CHAT_POLL_URL, pollBody(this.version, this.continuation));
     } catch {
+      if (this.outlived(epoch)) return;
       // Silence, not death — say nothing and drop nothing. A poll that failed
       // is a blip until the watchdog has asked and been ignored, which is the
       // same judgement the sockets make about a quiet channel.
+      //
+      // It does slow down, though. The interval here is the one the *server*
+      // asked for while it was healthy, and answering a 429 or a 500 at the
+      // pace of a working chat is how a client earns a longer ban than the one
+      // it already has. Capped at the same ceiling a server-supplied interval
+      // is, so the watchdog still gets its say first.
       this.busy = false;
-      this.pump(this.pollMs);
+      this.failures += 1;
+      this.pump(Math.min(YT_POLL_MAX_MS, this.pollMs * Math.pow(2, Math.min(this.failures, 4))));
       return;
     }
+    if (this.outlived(epoch)) return;
     this.busy = false;
-    if (this.dead) return;
+    this.failures = 0;
 
     const poll = parsePoll(raw);
     // The envelope is gone: there is nothing left to poll, so the stream ended.
@@ -302,18 +391,47 @@ export class YouTubeSource extends BaseSource {
     this.noteAlive();
     this.handle(poll.actions);
     this.pollMs = poll.timeoutMs;
-    if (poll.continuation && !poll.stale) this.followed += 1;
 
-    if (poll.stale) {
-      // The token expired — the chat is fine, our place in it is not. Pick the
-      // stream up again from the page rather than poll a token that is spent.
-      this.stopPolling();
+    if (poll.stale) return this.tokenStale();
+    if (!poll.continuation) return this.streamGone();
+
+    // Answered *and* advancing, which is the only thing that proves this
+    // connection works: a chat that cannot be followed resolves its pages
+    // perfectly, so a page that loaded is not evidence and must not be what
+    // zeroes the backoff.
+    this.followed += 1;
+    this.attempt = 0;
+    if (this.staleReloads >= 2) this.system('connected — youtube/' + this.channel);
+    this.staleReloads = 0;
+    this.continuation = poll.continuation;
+    this.pump(this.pollMs);
+  }
+
+  /**
+   * The server answered with a reload wrapper: our place in the chat is spent.
+   *
+   * Once is ordinary. The token expired, the chat itself is fine, and the fix
+   * is to pick the stream up again from the page — immediately, and without a
+   * word, because nothing the user can see has gone away.
+   *
+   * Twice in a row is a different thing: the token just fetched came back spent
+   * as well, so fetching again on the spot is a loop over two pages, one of
+   * them over a megabyte, as fast as the network will answer — and a
+   * "connected" line into the feed on every turn of it. That is a chat that
+   * cannot be followed, which is a connection lost: it says so once and takes
+   * the same backoff every other disconnect takes. The curve climbs because
+   * only a poll that advances zeroes it.
+   */
+  private tokenStale(): void {
+    this.stopPolling();
+    this.staleReloads += 1;
+    if (this.staleReloads === 1) {
       void this.connect();
       return;
     }
-    if (!poll.continuation) return this.streamGone();
-    this.continuation = poll.continuation;
-    this.pump(this.pollMs);
+    this.status('offline', 'chat is not advancing');
+    if (this.staleReloads === 2) this.system(`lost — youtube/${this.channel}`);
+    this.scheduleRetry();
   }
 
   /**
@@ -343,7 +461,8 @@ export class YouTubeSource extends BaseSource {
     for (const action of actions) {
       const item = dig(action, 'addChatItemAction', 'item', 'liveChatTextMessageRenderer');
       if (item) {
-        this.onMessage(this.toMessage(item));
+        const msg = this.toMessage(item);
+        if (this.remember(msg.id)) this.onMessage(msg);
         continue;
       }
       const removed = dig(action, 'removeChatItemAction', 'targetItemId');
@@ -353,7 +472,12 @@ export class YouTubeSource extends BaseSource {
       }
       const banned = dig(action, 'removeChatItemByAuthorAction', 'externalChannelId');
       if (banned) {
-        this.onRemove({ platform: 'youtube', channel: this.channel, user: this.logins.get(str(banned)) ?? '' });
+        // By channel id, which is the only unique thing about a YouTube author.
+        // Display names are freely reusable and copying a regular's name is
+        // routine in a large chat, so removing by name would take the person
+        // being impersonated down along with the impersonator — the same
+        // mistake as a ban leaking across channels, which 1.3.0 already fixed.
+        this.onRemove({ platform: 'youtube', channel: this.channel, userId: str(banned) });
       }
       // Anything else — a superchat, a membership gift, a renderer YouTube
       // introduced this morning — is skipped in silence. Switching on the full
@@ -370,7 +494,6 @@ export class YouTubeSource extends BaseSource {
     // ignore list and the ban rules compare against.
     const login = name.replace(/^@/, '').toLowerCase();
     const channelId = str(dig(item, 'authorExternalChannelId'));
-    if (channelId && login) this.logins.set(channelId, login);
     const sentUsec = Number(dig(item, 'timestampUsec'));
 
     return {

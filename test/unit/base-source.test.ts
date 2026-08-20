@@ -145,6 +145,33 @@ describe('reconnect backoff', () => {
     h.timers[h.timers.length - 1]?.fn();
     expect(h.sockets.length).toBe(socketsBefore + 1);
   });
+
+  /**
+   * Nothing is awaiting the retry, so a throw on the way out of connect() has
+   * nowhere to go: it becomes an uncaught error inside a timer and leaves the
+   * source with no timer of its own armed — wedged until the user toggles the
+   * row. Reported and retried like any other failure to connect instead.
+   */
+  it('survives a connect that throws when the retry timer fires it', () => {
+    let broken = false;
+    const made: FakeSocket[] = [];
+    const h = harness({
+      createSocket: () => {
+        if (broken) throw new Error('no socket');
+        const s = new FakeSocket();
+        made.push(s);
+        return s;
+      },
+    });
+    h.source.connect();
+    made[0]?.onclose?.();
+    broken = true;
+    const before = h.timers.length;
+    expect(() => h.timers[h.timers.length - 1]?.fn()).not.toThrow();
+    expect(h.statuses.at(-2)).toEqual({ state: 'error', detail: 'no socket' });
+    // And armed to try again, rather than left with nothing pending.
+    expect(h.timers.length).toBeGreaterThan(before);
+  });
 });
 
 /**

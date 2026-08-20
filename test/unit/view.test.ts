@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { normaliseConfig } from '../../src/main/config.js';
 import type { Config } from '../../src/main/types.js';
-import type { Badge, ChatMessage } from '../../src/renderer/sources/types.js';
+import type { Badge, ChatMessage, ConnectionState } from '../../src/renderer/sources/types.js';
 import {
   appearanceVars, badgeRendering, emptyHint, messagesToRemove, platformIconPath, platformMarker,
-  barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
+  platformTag, barAlert, plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -179,7 +179,7 @@ describe('statusDots', () => {
 });
 
 describe('barAlert', () => {
-  const dot = (key: string, state: 'online' | 'offline' | 'error' | 'connecting') =>
+  const dot = (key: string, state: ConnectionState) =>
     ({ key, label: key, state, title: key + ' — ' + state });
 
   it('says nothing at all while every channel is connected', () => {
@@ -211,6 +211,27 @@ describe('barAlert', () => {
 
   it('does not count channels when there is only one', () => {
     expect(barAlert([dot('tw/a', 'error')])).toMatchObject({ level: 'down', text: 'offline' });
+  });
+
+  /**
+   * A YouTube channel that is not streaming is the ordinary resting state of
+   * most channels, not a fault — and painting "1 of 2 offline" over a game for
+   * the five evenings a week somebody does not stream is exactly the permanent
+   * alert this design exists to avoid.
+   */
+  it('says nothing about a channel that is simply not live', () => {
+    expect(barAlert([dot('tw/a', 'online'), dot('yt/b', 'idle')]))
+      .toMatchObject({ level: 'ok', text: '' });
+    expect(barAlert([dot('yt/b', 'idle')])).toMatchObject({ level: 'ok', text: '' });
+  });
+
+  it('still counts the channels that really are down beside it', () => {
+    expect(barAlert([dot('tw/a', 'online'), dot('gg/b', 'offline'), dot('yt/c', 'idle')]))
+      .toMatchObject({ level: 'warn', text: '1 of 3 offline' });
+    // Every channel that could be carrying chat has stopped; the one that is
+    // not live was never going to be.
+    expect(barAlert([dot('gg/b', 'offline'), dot('yt/c', 'idle')]))
+      .toMatchObject({ level: 'down', text: 'all channels offline' });
   });
 
   it('carries every channel state in the tooltip', () => {
@@ -253,6 +274,34 @@ describe('messagesToRemove', () => {
     { id: 'c', platform: 'goodgame', channel: 'ann', user: 'nero' },
   ];
 
+  /**
+   * YouTube names a banned author by channel id, and that is the only unique
+   * thing about them: display names are freely reusable, and copying a
+   * regular's name is routine in a large chat. Matching on the name would take
+   * the person being impersonated down with the impersonator.
+   */
+  it('removes by author id without touching an impostor of the same name', () => {
+    const sameName = [
+      { id: 'a', platform: 'youtube', channel: 'ch', user: 'regular', userId: 'UCreal' },
+      { id: 'b', platform: 'youtube', channel: 'ch', user: 'regular', userId: 'UCtroll' },
+    ];
+    expect(messagesToRemove({ platform: 'youtube', channel: 'ch', userId: 'UCtroll' }, sameName))
+      .toEqual(['b']);
+  });
+
+  it('removes nothing for an author id nothing on screen carries', () => {
+    expect(messagesToRemove({ platform: 'youtube', channel: 'ch', userId: 'UCnever' }, [
+      { id: 'a', platform: 'youtube', channel: 'ch', user: 'regular', userId: 'UCreal' },
+    ])).toEqual([]);
+  });
+
+  it('keeps a ban inside the channel it was issued in, by id as well', () => {
+    expect(messagesToRemove({ platform: 'youtube', channel: 'one', userId: 'UCx' }, [
+      { id: 'a', platform: 'youtube', channel: 'one', user: 'bob', userId: 'UCx' },
+      { id: 'b', platform: 'youtube', channel: 'two', user: 'bob', userId: 'UCx' },
+    ])).toEqual(['a']);
+  });
+
   it('passes explicit ids straight through', () => {
     expect(messagesToRemove({ ids: ['a', 'zzz'] }, rendered)).toEqual(['a', 'zzz']);
   });
@@ -281,5 +330,22 @@ describe('messagesToRemove', () => {
 
   it('removes nothing for a request that targets nothing', () => {
     expect(messagesToRemove({}, rendered)).toEqual([]);
+  });
+});
+
+describe('platform artwork and tags', () => {
+  it('names the icon and the two-letter tag for each platform', () => {
+    expect(platformIconPath('twitch')).toBe('../assets/twitch.svg');
+    expect(platformIconPath('youtube')).toBe('../assets/youtube.svg');
+    expect(platformIconPath('goodgame')).toBe('../assets/goodgame.png');
+    expect(platformTag('twitch')).toBe('tw');
+    expect(platformTag('youtube')).toBe('yt');
+    expect(platformTag('goodgame')).toBe('gg');
+  });
+
+  /** A config file is hand-editable, so a platform nobody has heard of can arrive. */
+  it('falls back rather than rendering a blank marker', () => {
+    expect(platformIconPath('mystery')).toBe('../assets/goodgame.png');
+    expect(platformTag('mystery')).toBe('gg');
   });
 });

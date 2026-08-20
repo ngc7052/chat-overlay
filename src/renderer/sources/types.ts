@@ -30,10 +30,23 @@ export interface RemoveRequest {
   platform?: PlatformName;
   channel?: string;
   user?: string;
+  /**
+   * The platform's own id for the author, where it has one that is unique.
+   * YouTube's display names are not, so a ban that named one would remove the
+   * messages of anyone else using the same name.
+   */
+  userId?: string;
   all?: boolean;
 }
 
-export type ConnectionState = 'connecting' | 'online' | 'offline' | 'error';
+/**
+ * `idle` is the state that is neither working nor broken: connected to a
+ * channel that simply has nothing to carry — a YouTube channel that is not
+ * streaming, which is where most channels are most of the time. It is kept
+ * apart from `offline` because the bar draws only what is wrong, and this is
+ * not wrong.
+ */
+export type ConnectionState = 'connecting' | 'online' | 'offline' | 'error' | 'idle';
 
 /** The bits of a WebSocket the sources actually use, so tests can supply a fake. */
 export interface SocketLike {
@@ -50,6 +63,19 @@ export type SocketFactory = (url: string) => SocketLike;
 
 export interface HttpJson {
   (url: string): Promise<unknown>;
+}
+
+/**
+ * The two shapes YouTube needs that a JSON GET cannot cover: its continuation
+ * token is scraped out of an HTML page, and its chat endpoint is a POST.
+ * Both go through the main process against the same host allowlist.
+ */
+export interface HttpText {
+  (url: string): Promise<string>;
+}
+
+export interface HttpPost {
+  (url: string, body: unknown): Promise<unknown>;
 }
 
 export interface EmoteEntry { url: string; fallback?: string }
@@ -77,6 +103,9 @@ export interface SourceOptions {
   getConfig(): { emotes: boolean; thirdPartyEmotes: boolean; exactColors: boolean };
   createSocket?: SocketFactory;
   httpJson?: HttpJson;
+  /** YouTube only; see HttpText / HttpPost. */
+  httpText?: HttpText;
+  httpPost?: HttpPost;
   assets?: AssetApi;
   /** Reported when a catalogue fails to load; the chat itself carries on. */
   onWarn?(message: string): void;

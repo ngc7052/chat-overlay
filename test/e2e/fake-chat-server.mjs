@@ -136,6 +136,29 @@ export const GOODGAME_SCRIPT = [
 ];
 
 /**
+ * YouTube's transcript.
+ *
+ * `emoji` names a file under `fixtures/yt-emotes/`; standard emoji carry the
+ * character itself as their id, exactly as YouTube sends them, and the one
+ * custom membership emoji carries a channel-scoped id and no character at all —
+ * which is the difference the parts builder has to act on.
+ */
+export const YOUTUBE_SCRIPT = [
+  { at: 300, user: '@northwind_ada', text: 'first time catching this one live', badges: ['MODERATOR'] },
+  { at: 1000, user: '@quiet_lantern', text: 'that transition though ', emoji: ['fire'] },
+  { at: 1700, user: '@marrow_and_moss', text: 'chat is flying ', emoji: ['face_with_tears_of_joy'], member: 'Member (2 months)' },
+  { at: 2400, user: '@Tidewrack', text: 'been waiting all week for this ', emoji: ['partying_face'] },
+  { at: 3100, user: '@northwind_ada', text: 'clip at https://example.com/clip', badges: ['MODERATOR'] },
+  { at: 3800, user: '@sable_orbit', text: 'no words ', emoji: ['red_heart', 'red_heart'] },
+  { at: 4500, user: '@marrow_and_moss', text: 'members know ', emoji: ['_channelBLINK'], member: 'Member (2 months)' },
+  { at: 5200, user: '@HollowPine', text: 'how is this only 40 minutes in ', emoji: ['thinking_face'] },
+  { at: 5900, user: '@Tidewrack', text: 'straight up ', emoji: ['rocket'] },
+  { at: 6600, user: '@quiet_lantern', text: 'earned every bit of it ', emoji: ['clapping_hands'] },
+  { at: 7300, user: '@sable_orbit', text: 'i need a nap after that ', emoji: ['yawning_face'] },
+  { at: 8000, user: '@GraceOfHerons', text: 'thanks for streaming, all', badges: ['OWNER'] },
+];
+
+/**
  * Build the `emotes` tag Twitch would send for a line: `id:start-end,start-end`,
  * joined by `/`. Ranges are **code-point** indexed, which is why the offsets are
  * counted over `Array.from` rather than over the string's UTF-16 units.
@@ -159,6 +182,7 @@ function twitchEmotesTag(text) {
 export const SCRIPT = [
   ...TWITCH_SCRIPT.map((m) => ({ ...m, platform: 'twitch' })),
   ...GOODGAME_SCRIPT.map((m) => ({ ...m, platform: 'goodgame' })),
+  ...YOUTUBE_SCRIPT.map((m) => ({ ...m, platform: 'youtube' })),
 ].sort((a, b) => a.at - b.at);
 
 /* ---------------------------------------------------------------- server ---- */
@@ -176,7 +200,8 @@ function fixtureFor(pathname) {
   if (seg[0] === '7tv' && seg[1]) return `7tv/${seg[1]}.webp`;
   // GoodGame channel artwork: /files/icons/<channel>-<tier>-48.png
   if (seg[0] === 'files' && seg[1] === 'icons' && seg[2]) return `gg-channel-icons/${seg[2]}`;
-  if ((seg[0] === 'gg-icons' || seg[0] === 'gg-smiles' || seg[0] === 'twitch-badges') && seg[1]) {
+  if ((seg[0] === 'gg-icons' || seg[0] === 'gg-smiles' || seg[0] === 'twitch-badges'
+    || seg[0] === 'yt-emotes' || seg[0] === 'yt-badges') && seg[1]) {
     return `${seg[0]}/${seg[1]}`;
   }
   return null;
@@ -186,12 +211,228 @@ const CONTENT_TYPES = {
   '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.gif': 'image/gif',
 };
 
+/* ------------------------------------------------------------------ youtube */
+
+const YT_VIDEO_ID = 'e2eLiveVid0';
+/** What the app is told to wait between polls; the shipped default is 10s. */
+const YT_POLL_MS = 400;
+
+/** Read a JSON request body — the two socket protocols never needed one. */
+function readJson(req) {
+  return new Promise((resolve) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      try { resolve(JSON.parse(raw)); } catch { resolve({}); }
+    });
+  });
+}
+
+/**
+ * A channel's `/live` page. Assigns `ytInitialData` with `var`, which is what
+ * the watch page does — the chat page below uses the other form, and the app
+ * has to read both.
+ *
+ * The recommendation shelf is here on purpose: it puts a *different* videoId
+ * earlier in the document than the real one, which is exactly the trap that
+ * made a naive "first videoId in the HTML" read return another channel's
+ * stream. A page without it would let that bug pass.
+ */
+function watchPage(videoId) {
+  const data = videoId
+    ? {
+      shelf: [{ videoRenderer: { videoId: 'notTheOneX' } }],
+      currentVideoEndpoint: { watchEndpoint: { videoId } },
+    }
+    : { shelf: [{ videoRenderer: { videoId: 'notTheOneX' } }], contents: {} };
+  return `<!doctype html><html><body><script>var ytInitialData = ${JSON.stringify(data)};</script></body></html>`;
+}
+
+/**
+ * The chat pane, whose `subMenuItems` offer the filtered "Top chat" the page
+ * opens on and the unfiltered "Live chat". Only the second one is a complete
+ * feed, so the token handed out under "Top chat" is one this server refuses to
+ * advance — an overlay that took the default would go permanently quiet here
+ * instead of silently dropping messages in production.
+ */
+function chatPage() {
+  const data = {
+    contents: {
+      liveChatRenderer: {
+        continuations: [{ invalidationContinuationData: { continuation: 'top-chat', timeoutMs: YT_POLL_MS } }],
+        header: {
+          liveChatHeaderRenderer: {
+            viewSelector: {
+              sortFilterSubMenuRenderer: {
+                subMenuItems: [
+                  {
+                    title: 'Top chat', selected: true,
+                    subtitle: 'Some messages, such as potential spam, may not be visible',
+                    continuation: { reloadContinuationData: { continuation: 'top-chat' } },
+                  },
+                  {
+                    title: 'Live chat',
+                    subtitle: 'All messages are visible',
+                    continuation: { reloadContinuationData: { continuation: 'yt-0' } },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+  return '<!doctype html><html><body><script>window["ytInitialData"] = '
+    + JSON.stringify(data)
+    + ';var ytcfg={};ytcfg.set({"INNERTUBE_API_KEY":"AIzaFake","INNERTUBE_CLIENT_VERSION":"2.20260817.01.00"});</script></body></html>';
+}
+
+/**
+ * Google's cookie-consent interstitial, served — with a 200 on it — to any
+ * request that does not carry the consent cookie.
+ *
+ * Reproduced here because it is otherwise invisible: it only appears from
+ * inside the EU, so a CI box elsewhere would never meet it, and what it costs
+ * is the entire feature. Without the cookie the source finds no video on the
+ * channel and reports it as permanently not live.
+ */
+function consentPage() {
+  return '<!doctype html><html><body><h1>Before you continue to YouTube</h1>'
+    + '<form action="https://consent.youtube.com/save"></form></body></html>';
+}
+
+/**
+ * What YouTube's live chat answers a user agent it does not recognise: a 1.4 KB
+ * stub, again with a 200 on it, telling the caller to update their browser.
+ * The app must let Electron's own Chrome user agent out rather than name
+ * itself, and this is what fails if it stops doing that.
+ */
+function oldBrowserPage() {
+  return '<!doctype html><html><body>Oh no! It looks like you&#39;re using an older '
+    + 'version of your browser. Please update it to use live chat.</body></html>';
+}
+
+/** YouTube's own "no chat here" pane. Its text arrives translated, so the app
+    is expected to recognise the shape and not the words. */
+function noChatPage() {
+  const data = { contents: { messageRenderer: { text: { runs: [{ text: 'Šai tiešraides straumei ir atspējota tērzēšana.' }] } } } };
+  return `<!doctype html><html><body><script>window["ytInitialData"] = ${JSON.stringify(data)};</script></body></html>`;
+}
+
+/** One scripted line, in the shape `get_live_chat` answers with. */
+function ytItem(m, origin, index) {
+  const runs = [];
+  if (m.text) runs.push({ text: m.text });
+  for (const name of m.emoji ?? []) {
+    const custom = name.startsWith('_');
+    runs.push({
+      emoji: {
+        // A standard emoji's id is the character itself; a custom one is
+        // scoped to the channel and has no character at all.
+        emojiId: custom ? `UCe2e/${name}` : name,
+        shortcuts: [`:${name}:`],
+        image: {
+          thumbnails: [
+            { url: `${origin}/yt-emotes/${name}${custom ? '.gif' : '.png'}`, width: 24, height: 24 },
+            { url: `${origin}/yt-emotes/${name}${custom ? '.gif' : '.png'}`, width: 48, height: 48 },
+          ],
+        },
+        ...(custom ? { isCustomEmoji: true } : {}),
+      },
+    });
+  }
+  const badges = (m.badges ?? []).map((icon) => ({
+    liveChatAuthorBadgeRenderer: { icon: { iconType: icon }, tooltip: icon[0] + icon.slice(1).toLowerCase() },
+  }));
+  if (m.member) {
+    badges.push({
+      liveChatAuthorBadgeRenderer: {
+        customThumbnail: {
+          thumbnails: [
+            { url: `${origin}/yt-badges/member-2.png`, width: 16, height: 16 },
+            { url: `${origin}/yt-badges/member-2.png`, width: 32, height: 32 },
+          ],
+        },
+        tooltip: m.member,
+      },
+    });
+  }
+  return {
+    addChatItemAction: {
+      item: {
+        liveChatTextMessageRenderer: {
+          id: `yt-msg-${index}`,
+          authorName: { simpleText: m.user },
+          authorExternalChannelId: `UCauthor${index}`,
+          timestampUsec: String(Date.now() * 1000),
+          message: { runs },
+          ...(badges.length ? { authorBadges: badges } : {}),
+        },
+      },
+    },
+  };
+}
+
 export async function startFakeChat({
   port = 0, script = SCRIPT, loop = false, only = null,
   dropAfterMs = 0, stallAfterMs = 0, failCatalogues = false,
+  // YouTube: a channel that is not live until this many ms in (0 = live from
+  // the start), and a stream that ends this many ms in (0 = never).
+  ytLiveAfterMs = 0, ytEndAfterMs = 0,
 } = {}) {
   if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
+  let origin = '';
+  const startedAt = Date.now();
+  const ytScript = script.filter((m) => m.platform === 'youtube');
+
+
+  /**
+   * One poll, answered from where the caller's token says it got to.
+   *
+   * The token is the index of the next line to send, so successive polls walk
+   * the transcript exactly once however often they are made — which is the
+   * thing a push protocol never has to get right and a polling one always does.
+   */
+  function ytPoll(body) {
+    const token = String(body?.continuation ?? '');
+    // The filtered mode the chat page opens on. A real "Top chat" feed is
+    // merely incomplete; here it is empty and never advances, so an overlay
+    // that failed to decline it fails the run rather than passing quietly.
+    if (token === 'top-chat') return ytFrame([], 'top-chat');
+
+    const at = Number(/^yt-(\d+)$/.exec(token)?.[1] ?? -1);
+    if (at < 0) return {};   // not a token this server ever issued
+
+    if (ytEndAfterMs && Date.now() - startedAt >= ytEndAfterMs) {
+      // The stream ended: still a well-formed answer, but with nothing left to
+      // poll. Only the missing continuation says so.
+      return ytFrame([], null);
+    }
+
+    const elapsed = Date.now() - startedAt;
+    const actions = [];
+    let next = at;
+    while (next < ytScript.length && ytScript[next].at <= elapsed) {
+      actions.push(ytItem(ytScript[next], origin, next));
+      next++;
+    }
+    return ytFrame(actions, `yt-${next}`);
+  }
+
+  function ytFrame(actions, continuation) {
+    return {
+      continuationContents: {
+        liveChatContinuation: {
+          actions,
+          continuations: continuation
+            ? [{ invalidationContinuationData: { continuation, timeoutMs: YT_POLL_MS } }]
+            : [],
+        },
+      },
+    };
+  }
   const http = createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const fixture = fixtureFor(url.pathname);
@@ -216,6 +457,55 @@ export async function startFakeChat({
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(body));
     };
+    const html = (body) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(body);
+    };
+
+    /* ------------------------------------------------------------ youtube --
+     * The one source that is not a socket. YouTube publishes no chat socket,
+     * so the app scrapes a continuation token out of two pages and then polls
+     * for it — which means this server has to hold a conversation rather than
+     * push a transcript, and remember where each caller got to.
+     *
+     * The pages are shaped the way YouTube's are, not simplified: the same two
+     * different `ytInitialData` assignments, the same "Top chat" default that
+     * the app has to decline, the same translated "no chat here" pane. A
+     * fixture that skipped those would not exercise the code that reads them.
+     */
+    // Google answers a request with no consent cookie with an interstitial, and
+    // its live chat answers a user agent it does not know with a stub. Both are
+    // 200s carrying the wrong page, so a client that gets either one sees no
+    // error at all — only a channel that is mysteriously never live.
+    const youtubeRoute = url.pathname.endsWith('/live')
+      || url.pathname === '/live_chat'
+      || url.pathname.startsWith('/youtubei/');
+    if (youtubeRoute && !/(^|;\s*)SOCS=/.test(req.headers.cookie ?? '')) {
+      return html(consentPage());
+    }
+    if (url.pathname === '/live_chat' && !/^Mozilla\//.test(req.headers['user-agent'] ?? '')) {
+      return html(oldBrowserPage());
+    }
+
+    if (url.pathname.endsWith('/live')) {
+      const elapsed = Date.now() - startedAt;
+      const started = !ytLiveAfterMs || elapsed >= ytLiveAfterMs;
+      const over = !!ytEndAfterMs && elapsed >= ytEndAfterMs;
+      // A channel page stops offering a stream once it is over — eventually.
+      // The lag is deliberate: for a few seconds after the chat closes the page
+      // still advertises it, which is what YouTube does and what makes an
+      // ended stream look briefly like a live one.
+      const lagging = over && elapsed < ytEndAfterMs + 4000;
+      return html(watchPage(started && (!over || lagging) ? YT_VIDEO_ID : null));
+    }
+    if (url.pathname === '/live_chat') {
+      if (url.searchParams.get('v') !== YT_VIDEO_ID) return html(noChatPage());
+      return html(chatPage());
+    }
+    if (url.pathname === '/youtubei/v1/live_chat/get_live_chat') {
+      return readJson(req).then((body) => send(ytPoll(body)));
+    }
+
     if (url.pathname === '/api/getchannelstatus') {
       return send({
         [GG_CHANNEL_ID]: {
@@ -243,7 +533,8 @@ export async function startFakeChat({
 
   await new Promise((resolve) => http.listen(port, '127.0.0.1', resolve));
   const actualPort = http.address().port;
-  fx = fixtures(`http://127.0.0.1:${actualPort}`);
+  origin = `http://127.0.0.1:${actualPort}`;
+  fx = fixtures(origin);
   const channelId = GG_CHANNEL_ID;
 
   const wss = new WebSocketServer({ server: http });

@@ -14,7 +14,7 @@
     "check": "npm run typecheck && npm run coverage && npm run e2e",
     "changeset": "changeset",
     "version": "changeset version",
-    "e2e": "node test/e2e/run.mjs && node test/e2e/run.mjs --scenario=drop && node test/e2e/run.mjs --scenario=stall && node test/e2e/run.mjs --scenario=degraded && node test/e2e/run.mjs --scenario=staged && node test/e2e/run.mjs --scenario=trials && node test/e2e/run.mjs --scenario=crash",
+    "e2e": "node test/e2e/run.mjs && node test/e2e/run.mjs --scenario=drop && node test/e2e/run.mjs --scenario=stall && node test/e2e/run.mjs --scenario=degraded && node test/e2e/run.mjs --scenario=yt-offline && node test/e2e/run.mjs --scenario=yt-ended && node test/e2e/run.mjs --scenario=staged && node test/e2e/run.mjs --scenario=trials && node test/e2e/run.mjs --scenario=crash",
     "e2e:media": "node test/e2e/run.mjs --media --only=twitch && node test/e2e/run.mjs --media --only=goodgame",
     "e2e:one": "node test/e2e/run.mjs"
   },

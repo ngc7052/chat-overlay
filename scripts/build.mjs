@@ -78,6 +78,15 @@ await Promise.all([
     platform: 'node',
     format: 'cjs',
   }),
+  // And the release notes, for the same reason: the version of this that lived
+  // inline in the workflow was broken in every release it ever ran.
+  build({
+    ...common,
+    entryPoints: [path.join(root, 'tools/release-notes.ts')],
+    outfile: path.join(root, 'dist/tools/release-notes.cjs'),
+    platform: 'node',
+    format: 'cjs',
+  }),
 ]);
 
 /* -------------------------------------------------------------- static ---- */

@@ -1,0 +1,62 @@
+name: Bug report
+description: Something the overlay does wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The three fields below are the ones that
+        usually decide whether a problem can be reproduced, so please fill them
+        in even if the answer feels obvious.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Settings → the version is at the bottom of the panel. Or the folder you unzipped.
+      placeholder: "1.4.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Which chat
+      description: If it happens on more than one, pick them all.
+      multiple: true
+      options:
+        - Twitch
+        - YouTube
+        - GoodGame
+        - Not about a particular chat
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: |
+        What you did, what you saw, and what you expected instead. If it
+        involves a specific channel, naming it helps — a lot of chat problems
+        only happen on one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: |
+        A screenshot is worth a lot for anything visual. If the overlay is
+        showing nothing at all, the messages in the feed itself (`connected —`,
+        `lost —`, `no reply — reconnecting`) say what it thinks is going on.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        **Two things that are usually not bugs:** a quiet channel looks the same
+        as a broken one until the overlay says otherwise, and a YouTube channel
+        that is not live has no chat to show — the overlay says so in the feed.

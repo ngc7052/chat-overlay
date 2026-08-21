@@ -1,0 +1,30 @@
+name: Idea
+description: Something the overlay should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like it to do
+      description: |
+        What you are trying to achieve, as much as the feature itself — there
+        is often a simpler way to get there that nobody thought to suggest.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead
+      description: Whatever the current workaround is, if there is one.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        Worth knowing before you write: the overlay is **read-only and
+        anonymous** on every platform, deliberately. It never asks for a login,
+        a token or an account, which rules out sending messages, moderating, or
+        anything else that needs to know who you are. That is not a gap waiting
+        to be filled — it is why the thing needs no setup.

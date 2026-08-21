@@ -53,6 +53,7 @@ function screen(over: Partial<Config> = {}): Screen {
     detach: (node) => { nodes = nodes.filter((n) => n !== node); },
     fade: (node) => { node.fading = true; },
     schedule: (flush) => { pendingFrame = flush; },
+    now: () => now,
     painted: () => { state.paints += 1; },
     config: () => config,
     setTimer: (run, ms) => {
@@ -326,5 +327,228 @@ describe('message lifetime', () => {
     s.feed.remove('a');
     s.tick(10000);
     expect(s.shown()).toEqual([]);
+  });
+});
+
+/**
+ * A poll's arrivals, and what the feed does with the interval it names.
+ *
+ * The measurements these exist to hold: against a channel answered every
+ * 1300ms, a chat running at eight messages a second used to write 9.6 of them
+ * into the feed in one frame — a 246px jump — and then nothing for 1304ms. At
+ * thirty a second it was 883px, more than a window height, so lines were
+ * scrolled past without ever being painted. Paced, both are one message and
+ * 25px per write, 84ms and 20ms apart.
+ */
+describe('pacing what a poll delivers', () => {
+  /** A poll's answer: `count` messages at once, naming the interval to the next. */
+  const poll = (
+    feed: Feed<Node, number>,
+    count: number,
+    paceMs: number,
+    over: (i: number) => Partial<ChatMessage> = () => ({}),
+  ): void => {
+    for (let i = 0; i < count; i++) {
+      feed.add(message({ id: 'p' + i, platform: 'youtube', ...over(i) }), paceMs);
+    }
+  };
+
+  /** Frames, as a display produces them: the clock moves and then one runs. */
+  const frames = (s: Screen, count: number, ms = 16): void => {
+    for (let i = 0; i < count; i++) { s.tick(ms); s.frame(); }
+  };
+
+  it('lets a batch out one message at a time instead of in a single write', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 10, 1000);
+    // The head goes out in the frame it would have had anyway — pacing costs
+    // the first message of a batch nothing.
+    s.frame();
+    expect(s.writes).toEqual([1]);
+    expect(s.shown()).toEqual(['p0']);
+
+    frames(s, 60);
+    expect(s.shown()).toHaveLength(10);
+    // Ten writes of one, which is what a socket looks like.
+    expect(s.writes).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+  });
+
+  it('spreads them over the interval rather than over the next few frames', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 10, 1000);
+    s.frame();
+    // A tenth of the way through the 700ms window is one more message, not the
+    // other nine — the release follows the clock, not the frame rate.
+    frames(s, 1, 70);
+    expect(s.shown()).toEqual(['p0', 'p1']);
+    // Half way, half the batch — plus the head, which went out at once.
+    frames(s, 7, 40);
+    expect(s.shown()).toHaveLength(6);
+    frames(s, 8, 40);
+    expect(s.shown()).toHaveLength(10);
+  });
+
+  it('empties the queue well before the next answer is due', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 20, 1000);
+    // The interval is 1000ms and the window 700ms, so the queue is empty with
+    // 300ms to spare — a batch can never be still going out when the next
+    // one lands, which is what would let the queue grow without bound.
+    frames(s, 44);
+    expect(s.shown()).toHaveLength(20);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('caps how long a message is ever held back, whatever interval is named', () => {
+    const s = screen({ maxMessages: 100 });
+    // YouTube's advertised timeout goes up to thirty seconds. 70% of that would
+    // be twenty-one, which is not smoothing, it is a delay.
+    poll(s.feed, 5, 30000);
+    frames(s, 20, 50);
+    expect(s.shown()).toHaveLength(5);
+  });
+
+  it('releases the rest at once if the window runs out', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 10, 1000);
+    s.frame();
+    // An occluded window, a long task, a frame that simply did not come: the
+    // deadline is what bounds the delay, not the supply of frames.
+    s.tick(5000);
+    s.frame();
+    expect(s.shown()).toHaveLength(10);
+    expect(s.writes).toEqual([1, 9]);
+  });
+
+  it('leaves a source that arrives one at a time alone', () => {
+    const s = screen({ maxMessages: 100 });
+    // No interval named, so nothing to smooth: a socket already trickles, and a
+    // frame of delay added to one of its messages is a regression.
+    for (let i = 0; i < 10; i++) s.feed.add(message({ id: 's' + i }));
+    s.frame();
+    expect(s.writes).toEqual([10]);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('stops pacing the moment a socket message joins the queue', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 10, 1000);
+    frames(s, 3);
+    expect(s.shown()).toHaveLength(1);
+    // Order is arrival order, so this one is behind the eight still waiting.
+    // Rather than hold it there for the rest of the window, the whole queue
+    // goes out — which is the behaviour that shipped before pacing existed.
+    s.feed.add(message({ id: 'tw' }));
+    s.tick(16);
+    s.frame();
+    expect(s.shown()).toEqual(['p0', 'p1', 'p2', 'p3', 'p4',
+      'p5', 'p6', 'p7', 'p8', 'p9', 'tw']);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('keeps arrival order across sources while a batch is going out', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 4, 1000);
+    frames(s, 2);
+    // A second answer mid-release: the leftovers of the first are simply part
+    // of the new batch, and stay in front of it.
+    for (let i = 0; i < 3; i++) {
+      s.feed.add(message({ id: 'q' + i, platform: 'youtube' }), 1000);
+    }
+    frames(s, 60);
+    expect(s.shown()).toEqual(['p0', 'p1', 'p2', 'p3', 'q0', 'q1', 'q2']);
+  });
+
+  it('does not pace a single message', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 1, 1000);
+    s.frame();
+    expect(s.shown()).toEqual(['p0']);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('does not pace a batch the cap had to cut down', () => {
+    const s = screen({ maxMessages: 10 });
+    // 200 against a cap of 10: 190 can never be seen, and the ten that can
+    // replace every line on screen however they are drawn. Spreading that over
+    // most of a second would be a wipe, and a write every frame throughout.
+    poll(s.feed, 200, 1000);
+    s.frame();
+    expect(s.writes).toEqual([10]);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('still declines when a moderator thins that batch below the cap', () => {
+    const s = screen({ maxMessages: 10 });
+    poll(s.feed, 200, 1000, (i) => (i >= 195 ? { userId: 'UCtroll' } : { userId: 'UC' + i }));
+    // Five of the surviving ten taken down inside the same answer. What is left
+    // is under the cap, but 200 still arrived — having had to drop any of them
+    // is the tell, not what happens to be queued when the frame comes.
+    s.feed.apply({ platform: 'youtube', channel: 'halcyon_tv', userId: 'UCtroll' });
+    s.frame();
+    expect(s.writes).toEqual([5]);
+    expect(s.frame()).toBe(false);
+  });
+
+  it('does not pace a batch that fills the cap exactly', () => {
+    const s = screen({ maxMessages: 10 });
+    poll(s.feed, 10, 1000);
+    s.frame();
+    expect(s.writes).toEqual([10]);
+  });
+
+  it('asks for no frame at all once the queue is empty', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 5, 1000);
+    frames(s, 44);
+    expect(s.shown()).toHaveLength(5);
+    // Nothing is left to release, so nothing keeps running over an empty queue.
+    expect(s.frame()).toBe(false);
+    expect(s.timersLeft()).toBe(0);
+  });
+
+  it('takes a ban down before the messages it names are let out', () => {
+    const s = screen({ maxMessages: 100 });
+    poll(s.feed, 10, 1000, (i) => (i % 2 === 0
+      ? { userId: 'UCtroll', userLogin: 'troll' }
+      : { userId: 'UCok' + i }));
+    frames(s, 3);
+    expect(s.shown()).toEqual(['p0']);
+    // Arriving in the same answer as the messages it acts on, with eight of
+    // them still queued and unbuilt — the case the DOM cannot answer.
+    s.feed.apply({ platform: 'youtube', channel: 'halcyon_tv', userId: 'UCtroll' });
+    frames(s, 60);
+    expect(s.shown()).toEqual(['p1', 'p3', 'p5', 'p7', 'p9']);
+    expect(s.builds).toEqual(['p0', 'p1', 'p3', 'p5', 'p7', 'p9']);
+  });
+
+  it('lets a message expire while it is waiting its turn', () => {
+    const s = screen({ maxMessages: 100, messageLifetime: 5, fadeDuration: 1 });
+    poll(s.feed, 10, 1000);
+    s.frame();
+    // The lifetime runs from arrival for a paced message exactly as it does for
+    // a coalesced one, so a queue held up by a missing frame expires in place
+    // rather than appearing five seconds late.
+    s.tick(5000);
+    expect(s.builds).toEqual(['p0']);
+    s.frame();
+    expect(s.builds).toEqual(['p0']);
+    s.tick(1000 + FADE_GRACE_MS);
+    expect(s.shown()).toEqual([]);
+    expect(s.timersLeft()).toBe(0);
+  });
+
+  it('holds the cap exactly across two paced answers', () => {
+    const s = screen({ maxMessages: 10 });
+    poll(s.feed, 8, 1000);
+    frames(s, 44);
+    for (let i = 0; i < 6; i++) {
+      s.feed.add(message({ id: 'q' + i, platform: 'youtube' }), 1000);
+    }
+    frames(s, 44);
+    expect(s.shown()).toEqual([
+      'p4', 'p5', 'p6', 'p7',
+      'q0', 'q1', 'q2', 'q3', 'q4', 'q5',
+    ]);
   });
 });

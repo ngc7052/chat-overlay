@@ -95,7 +95,7 @@ conversation that remembers where each caller's continuation token got to — an
 serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs ten scenarios in a couple of minutes, because the happy path
+`npm run e2e` runs eleven scenarios in a couple of minutes, because the happy path
 is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
@@ -109,6 +109,7 @@ is the one thing a real install rarely stays on:
 | `--scenario=yt-offline` | a YouTube channel that is not live for the first six seconds — the state neither socket has. Nothing is broken, so it says so in the feed once, waits on its own slow cadence rather than a failure curve, and connects itself the moment a stream starts |
 | `--scenario=yt-ended` | a YouTube stream that ends mid-chat, while the channel page goes on advertising it for a few more seconds — the app must report the loss, decline to re-resolve it in a hot loop, and settle back to "not live" |
 | `--scenario=burst` | one poll answer carrying 300 messages, with a timeout and a ban for lines *inside the same batch* — what a busy YouTube channel does and what neither socket ever produces. Asserts the batch is written to the feed once rather than 300 times, that nothing over the cap is built at all, and that order, moderation, the cap, auto-scroll and message lifetimes all survive the queue. Prints the layout count and the longest main-thread block, which is where the before/after numbers come from |
+| `--scenario=rhythm` | a channel talking steadily at one, eight and thirty messages a second, answered at the 1300ms YouTube asks a busy chat to wait — the shape of a poll rather than its cost. Records every write into the feed: how many messages it carried, how far it moved the text, and how long since the last one. Asserts the feed is written a message at a time rather than in lumps, that nothing is lost or held past its interval, and that a quiet channel is not paced at all. Prints the before/after playout numbers |
 | `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
 
 `drop` and `stall` run the two socket channels alone. They exist to test what a
@@ -244,6 +245,22 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   already running, and the cap already counts it — none of which can be done
   by reading the DOM. That is why removals match against the messages rather
   than against `data-user`.
+- **The queue is also let out across the interval, not all at once.** Batching
+  fixed what a poll's answer costs; it did not touch the shape it arrives in.
+  Measured against a channel answered every 1300ms, a chat running at eight
+  messages a second wrote 9.6 of them into the feed in one frame — a 246px jump
+  under the reader's eye — and then nothing for 1304ms, over and over. At thirty
+  a second it was 883px in one frame, more than a window height, so lines
+  appeared and were scrolled past without ever being painted once. So a source
+  that arrives in lumps passes `paceMs` — the interval the server itself asked
+  for — with each message, and the queue is released across 70% of it, capped at
+  a second. Rules that keep it honest: **a socket passes nothing and is never
+  paced**, and an unpaced arrival flushes the whole queue, so a Twitch message
+  is never held behind somebody else's batch. **A batch the cap had to cut down
+  is not paced either** — it replaces every line on screen however it is drawn,
+  and spreading that is a wipe plus a write every frame throughout. The numbers
+  are in `PACE_FRACTION` and `PACE_MAX_MS`; `--scenario=rhythm` is the
+  measurement.
 - **The feed's scroll position is not `justify-content: flex-end`.** Content
   overflowing the *start* edge of a flex container is not part of its
   scrollable overflow, so with `flex-end` a feed taller than the window had

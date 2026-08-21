@@ -100,7 +100,7 @@ is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
 |---|---|
-| default | messages, badges, emotes, colours, superchats, memberships, lock, settings, drag regions |
+| default | messages, badges, emotes, colours, superchats, memberships, lock, settings, drag regions — and a YouTube row typed with no `@`, which the fake server 404s exactly as YouTube does for a handle-only channel |
 | `--scenario=drop` | both sockets terminated mid-transcript with no close frame — the app must notice, back off, reconnect and carry on, with nobody pressing anything |
 | `--scenario=stall` | both sockets held open and simply muted, in both directions — no close frame ever comes, so only the liveness watchdog can tell this apart from a quiet channel. It has to probe, get nothing back, say so and reconnect. `OVERLAY_TEST_WATCHDOG_MS` shrinks the wait for the run; every other scenario gets the shipped minutes |
 | `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
@@ -314,6 +314,21 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   rather than on the connection backoff, and connects itself when a stream
   starts. The page that answers "is it live" is over a megabyte, which is most
   of why that cadence is minutes and not seconds.
+- **A bare YouTube name is asked for as typed, and only then with an `@` on
+  it.** A word with no `@` is two things at once and nothing local tells them
+  apart: a legacy custom url — `youtube.com/PewDiePie` predates handles and
+  still resolves — or a handle typed the way anyone says a channel name aloud,
+  which is the only form a channel made since 2022 has. Measured against real
+  YouTube: `/PlayWithDeepx` is a 404 while `/@PlayWithDeepx` is the page, and
+  `/@marquesbrownlee` is a 404 while the bare one is the page. So both forms
+  are live and neither covers the other. The typed form goes first so that no
+  row which resolves today can quietly change which channel it means; `@word`
+  is the fallback. `chatTarget` decides the pair, `YouTubeSource.livePage`
+  spends the requests, and the form that answered is remembered — otherwise a
+  handle-only channel writes an `HTTP 404` into the log every YT_NOT_LIVE_MS
+  while it is not streaming, because `ipcMain.handle` logs every rejection.
+  Everything else — `@name`, a `UC…` id, a pasted url — already names one
+  thing exactly and has no fallback and no second request.
 - **Never resolve a YouTube stream from the first `"videoId"` in the HTML.**
   That is a recommendation shelf. Asked twice in a row for one channel it
   returned two different ids, one of them a different channel's stream.

@@ -10,6 +10,7 @@
  *   node test/e2e/run.mjs --scenario=yt-offline a youtube channel that is not live yet
  *   node test/e2e/run.mjs --scenario=yt-ended   a youtube stream that ends mid-chat
  *   node test/e2e/run.mjs --scenario=burst    a poll that lands hundreds of messages at once
+ *   node test/e2e/run.mjs --scenario=rhythm   how a poll's lumps reach the screen
  *   node test/e2e/run.mjs --scenario=staged   a downloaded payload must be run
  *   node test/e2e/run.mjs --scenario=trials   one that never starts is dropped
  *   node test/e2e/run.mjs --scenario=crash    one that throws is quarantined
@@ -59,6 +60,9 @@ const server = await startFakeChat({
   // either socket protocol.
   ytLiveAfterMs: scenario === 'yt-offline' ? 6000 : 0,
   ytEndAfterMs: scenario === 'yt-ended' ? 4000 : 0,
+  // The rhythm measurement wants the cadence a real chat is answered at, not
+  // the brisk one the rest of the run uses to keep itself short.
+  ytPollIntervalMs: scenario === 'rhythm' ? 1300 : undefined,
 });
 // Outside the repo on purpose. A real install keeps its payload under
 // %APPDATA%, where no package.json sits above it; inside the repo, node finds
@@ -84,7 +88,9 @@ const allSources = [
 const socketScenario = scenario === 'drop' || scenario === 'stall';
 const sources = only
   ? allSources.filter((s) => s.platform === only)
-  : allSources.filter((s) => !socketScenario || s.platform !== 'youtube');
+  : scenario === 'rhythm'
+    ? allSources.filter((s) => s.platform === 'youtube')
+    : allSources.filter((s) => !socketScenario || s.platform !== 'youtube');
 
 writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
   sources,
@@ -96,7 +102,7 @@ writeFileSync(path.join(dataDir, 'config.json'), JSON.stringify({
   // Above the 43 lines the three transcripts add up to, so nothing is trimmed
   // mid-run — except in the burst scenario, which is about what happens when
   // far more than the cap arrives at once and so wants the shipped default.
-  maxMessages: scenario === 'burst' ? 120 : 60,
+  maxMessages: scenario === 'burst' ? 120 : scenario === 'rhythm' ? 200 : 60,
   autoCheckUpdates: false,     // no network in a test run
 }, null, 2));
 

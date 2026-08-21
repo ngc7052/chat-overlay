@@ -216,6 +216,8 @@ const CONTENT_TYPES = {
 const YT_VIDEO_ID = 'e2eLiveVid0';
 /** What the app is told to wait between polls; the shipped default is 10s. */
 const YT_POLL_MS = 400;
+/** Overridden per run so a scenario can poll at the cadence a real chat does. */
+let ytPollMs = YT_POLL_MS;
 
 /** Read a JSON request body — the two socket protocols never needed one. */
 function readJson(req) {
@@ -259,7 +261,7 @@ function chatPage() {
   const data = {
     contents: {
       liveChatRenderer: {
-        continuations: [{ invalidationContinuationData: { continuation: 'top-chat', timeoutMs: YT_POLL_MS } }],
+        continuations: [{ invalidationContinuationData: { continuation: 'top-chat', timeoutMs: ytPollMs } }],
         header: {
           liveChatHeaderRenderer: {
             viewSelector: {
@@ -381,8 +383,9 @@ export async function startFakeChat({
   dropAfterMs = 0, stallAfterMs = 0, failCatalogues = false,
   // YouTube: a channel that is not live until this many ms in (0 = live from
   // the start), and a stream that ends this many ms in (0 = never).
-  ytLiveAfterMs = 0, ytEndAfterMs = 0,
+  ytLiveAfterMs = 0, ytEndAfterMs = 0, ytPollIntervalMs = YT_POLL_MS,
 } = {}) {
+  ytPollMs = ytPollIntervalMs;
   if (only) script = script.filter((m) => m.platform === only);
   let fx = null;
   let origin = '';
@@ -477,7 +480,7 @@ export async function startFakeChat({
         liveChatContinuation: {
           actions,
           continuations: continuation
-            ? [{ invalidationContinuationData: { continuation, timeoutMs: YT_POLL_MS } }]
+            ? [{ invalidationContinuationData: { continuation, timeoutMs: ytPollMs } }]
             : [],
         },
       },
@@ -558,6 +561,24 @@ export async function startFakeChat({
 
     // Test control: arm a burst for the next poll. Not part of any protocol —
     // the app never calls it, only the e2e driver does.
+    // Test control: a steady arrival rate, queued server-side so the clumping
+    // the app sees is the poll's own and not the harness's HTTP jitter. This is
+    // what a busy channel is — people talking continuously, handed over in
+    // whatever lumps the poll interval cuts them into.
+    if (url.pathname === '/e2e/rate') {
+      const every = Number(url.searchParams.get('every') ?? 100);
+      const secs = Number(url.searchParams.get('secs') ?? 10);
+      const n = Number(url.searchParams.get('n') ?? 1);
+      const tag = url.searchParams.get('tag') ?? 'flow';
+      let left = Math.round((secs * 1000) / every);
+      const timer = setInterval(() => {
+        ytBurst({ n, tag, moderate: false });
+        if (--left <= 0) clearInterval(timer);
+      }, every);
+      timer.unref?.();
+      return send({ ticks: left, every, n });
+    }
+
     if (url.pathname === '/e2e/burst') {
       return send(ytBurst({
         n: Number(url.searchParams.get('n') ?? 300),

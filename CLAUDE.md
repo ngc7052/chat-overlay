@@ -292,6 +292,16 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
 - **GoodGame chat icons are plain white SVGs** (`fill="white"`), so they are
   drawn as `<img>`. An earlier version assumed they were fill-less and drew
   them as CSS masks, which turned every badge into the same silhouette.
+- **The moderator and broadcaster badges are shipped in the app**, under
+  `static/assets/`, and drawn for any badge of those kinds that arrives with no
+  artwork of its own — which is every one on GoodGame and YouTube, and every one
+  on Twitch when the badge mirror is down. They match the symbols Twitch uses so
+  the same role reads the same on all three platforms. Do not fetch Twitch's
+  artwork for another platform's message: it is a network dependency for a badge
+  that has nothing to do with Twitch, and `--scenario=degraded` exists because
+  that mirror goes down. They carry their own fills, for the mask reason above;
+  `test/unit/badge-icons.test.ts` holds them to it. `badgeStyle` stays a user
+  choice — `text` still means text for these, and `off` still means nothing.
 - Chat is **read-only and anonymous** on every platform. Do not add anything
   that needs a login. This is why YouTube is read through the endpoint its own
   watch page polls and not through the YouTube Data API: the API needs a key the

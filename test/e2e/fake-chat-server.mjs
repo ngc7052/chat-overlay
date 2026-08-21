@@ -123,6 +123,7 @@ export const GOODGAME_SCRIPT = [
   { at: 1800, user: 'Сумрак77', color: 'simple', text: 'вот это реакция конечно :kekw:' },
   { at: 2500, user: 'Печенька', color: 'premium-personal', premium: 1, icon: 'cup', text: 'я аж подпрыгнула :wow:' },
   { at: 3200, user: 'ЛунныйЗаяц', color: 'simple', text: 'сколько попыток было? :peka:' },
+  { at: 3550, user: 'Сторож', color: 'simple', rights: 10, text: 'ссылки только в чат, пожалуйста' },
   { at: 3900, user: 'Ветродуй', color: 'streamer', rights: 20, icon: 'eagle', text: 'сорок одна, я считал :cool:' },
   { at: 4600, user: 'ГрозаМорей', color: 'simple', icon: 'star', premium: 1, ggPlus: 12, resub: 5, text: 'терпение и труд :winner:' },
   { at: 5300, user: 'Сумрак77', color: 'simple', text: 'без единой ошибки прошёл :fire: :metal:' },

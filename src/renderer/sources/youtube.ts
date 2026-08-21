@@ -64,9 +64,10 @@ export const YT_SEEN_MAX = 400;
  * The badges the protocol names by icon rather than by artwork.
  *
  * YouTube publishes no badge API and sends no image for these three, only the
- * name — so they map onto the kinds the stylesheet already colours and render
- * as text chips, exactly as GoodGame's roles do. Membership badges are the
- * other kind and do carry their own artwork; see ytBadges.
+ * name — so they map onto the kinds the renderer already knows, exactly as
+ * GoodGame's roles do: moderator and broadcaster get the bundled artwork, the
+ * rest a text chip. Membership badges are the other kind and do carry their own
+ * artwork; see ytBadges.
  */
 export const YT_BADGES: Record<string, { kind: string; label: string }> = {
   OWNER: { kind: 'broadcaster', label: 'HOST' },

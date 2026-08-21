@@ -115,8 +115,9 @@ interface GgMessageData {
 
 /**
  * Role comes from a numeric rights level, and the per-user icon comes from the
- * `icon` field — the same one the site draws. Roles keep a text chip because
- * the protocol sends no icon for them.
+ * `icon` field — the same one the site draws. The protocol sends no artwork for
+ * a role, so `url` stays null; the renderer draws the bundled moderator and
+ * broadcaster icons for those two and a text chip for the rest.
  */
 export function ggBadges(
   d: GgMessageData,

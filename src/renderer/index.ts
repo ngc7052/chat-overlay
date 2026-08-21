@@ -8,8 +8,8 @@ import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/type
 import { debounce, timeString, type MessagePart } from './util.js';
 import { Feed } from './feed.js';
 import {
-  appearanceVars, badgeRendering, barAlert, emptyHint, pinnedToBottom, platformIconPath,
-  platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
+  appearanceVars, badgeIconPath, badgeRendering, barAlert, emptyHint, pinnedToBottom,
+  platformIconPath, platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
   type BarAlert, type SourceStatus,
 } from './view.js';
 
@@ -258,10 +258,11 @@ function buildMessage(msg: ChatMessage): HTMLElement {
 
   if (msg.kind === 'chat') {
     for (const b of visibleBadges(msg, config)) {
-      if (badgeRendering(b, config) === 'image' && b.url) {
+      const art = badgeIconPath(b);
+      if (badgeRendering(b, config) === 'image' && art) {
         const img = document.createElement('img');
         img.className = 'badge-img';
-        img.src = b.url;
+        img.src = art;
         img.alt = b.title || b.label;
         img.title = b.title || b.label;
         img.addEventListener('error', () => img.replaceWith(chip(b.label, b.kind)), { once: true });

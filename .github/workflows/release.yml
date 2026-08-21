@@ -100,32 +100,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # Prefer this version's CHANGELOG section; fall back to the blurb alone.
-          node -e "
-            const fs = require('node:fs');
-            const version = process.argv[1];
-            let body = '';
-            try {
-              const log = fs.readFileSync('CHANGELOG.md', 'utf8');
-              const m = new RegExp('^## ' + version.replace(/\./g, '\\.') + '\\s*$([\\s\\S]*?)(?=^## |\\Z)', 'm').exec(log);
-              if (m) body = m[1].trim();
-            } catch {}
-            fs.writeFileSync('changelog-section.md', body);
-          " "${{ steps.v.outputs.version }}"
-          cat > notes.md <<'EOF'
-          Download **`ChatOverlay.zip`** below, unzip anywhere, run `ChatOverlay.exe`.
-          Windows 10/11 64-bit — no installer, no Node.js, no admin rights.
-
-          Windows shows a SmartScreen warning the first time because the exe is not
-          code-signed: **More info → Run anyway**.
-
-          Existing installs pick this up from Settings → **Updates** (about 35 KB).
-
-          ---
-          EOF
-          if [ -s changelog-section.md ]; then
-            printf '\n## Changes\n\n' >> notes.md
-            cat changelog-section.md >> notes.md
+          # The notes are built by tools/release-notes.ts, which has tests. It
+          # used to be a node -e "..." right here, and the shell ate a level of
+          # backslash out of its regex, so every release published without its
+          # changelog and looked fine doing it.
+          node dist/tools/release-notes.cjs \
+            "${{ steps.v.outputs.version }}" \
+            "${{ steps.v.outputs.tag }}" \
+            "$GITHUB_REPOSITORY" \
+            CHANGELOG.md \
+            notes.md
+          # A version with no changelog section is legitimate, but it is nearly
+          # always a mistake, so fail loudly rather than publish a thinner page.
+          if ! grep -q '^## Changes$' notes.md; then
+            echo "::error::no CHANGELOG.md section for ${{ steps.v.outputs.version }}" >&2
+            exit 1
           fi
           gh release create "${{ steps.v.outputs.tag }}" \
             dist/ChatOverlay.zip dist/app-payload.json.gz \

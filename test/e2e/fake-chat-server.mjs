@@ -504,7 +504,23 @@ export async function startFakeChat({
   let fx = null;
   let origin = '';
   const startedAt = Date.now();
-  const ytScript = script.filter((m) => m.platform === 'youtube');
+  /**
+   * YouTube's transcript, laid out on the same clock the sockets replay on.
+   *
+   * `loop` is what a media capture wants: the run keeps recording long after
+   * the ten seconds of scripted chat have gone by, and a demo of a still feed
+   * is not a demo. The sockets get it by re-running `replay` at an offset, and
+   * a poll gets it by having the repeats already in the script it walks — which
+   * also keeps every item's id distinct, so the renderer's own de-dup does not
+   * throw the second pass away as chat it has already seen.
+   */
+  const ytScript = (() => {
+    const base = script.filter((m) => m.platform === 'youtube');
+    if (!loop || !base.length) return base;
+    const span = base[base.length - 1].at + 1500;
+    return Array.from({ length: 20 }, (_, i) =>
+      base.map((m) => ({ ...m, at: m.at + span * i }))).flat();
+  })();
 
   /**
    * Actions waiting to go out on the next poll, and the id counter that keeps

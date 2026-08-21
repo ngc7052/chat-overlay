@@ -4,6 +4,7 @@
  *
  *   node test/e2e/run.mjs                     assert only
  *   node test/e2e/run.mjs --media             also write docs/media/*.png
+ *   node test/e2e/run.mjs --media --only=youtube one platform's demo frames
  *   node test/e2e/run.mjs --scenario=drop     kill the sockets, expect recovery
  *   node test/e2e/run.mjs --scenario=stall    hold them open and go silent
  *   node test/e2e/run.mjs --scenario=degraded break every catalogue endpoint
@@ -30,8 +31,9 @@ import { startFakeChat } from './fake-chat-server.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '..', '..');
 const wantMedia = process.argv.includes('--media');
-// --only=twitch / --only=goodgame captures one chat at a time, so a demo shows
-// what a single platform looks like rather than two interleaved.
+// --only=twitch / --only=goodgame / --only=youtube captures one chat at a time,
+// so a demo shows what a single platform looks like rather than three
+// interleaved.
 const only = (process.argv.find((a) => a.startsWith('--only=')) ?? '').split('=')[1] || null;
 // Scenarios put the app under conditions a real chat produces daily but a
 // happy-path run never sees: a dropped connection, and a catalogue host that

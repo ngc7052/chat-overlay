@@ -7,5 +7,6 @@ coverage/
 # e2e captures land here; only the finished demo assets are kept.
 docs/media/*
 !docs/media/demo-twitch.gif
+!docs/media/demo-youtube.gif
 !docs/media/demo-goodgame.gif
 !docs/media/twitch-settings.png

@@ -623,6 +623,7 @@ async function scenarioDegraded() {
     twitchBadges: document.querySelectorAll('.msg img.badge-img[src*="/twitch-badges/"]').length,
     ggBadges: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/files/icons/"]').length,
     chips: document.querySelectorAll('.msg .badge').length,
+    twRoleIcons: document.querySelectorAll('.msg[data-platform="twitch"] img.badge-img[src*="/assets/badge-"]').length,
     broken: Array.from(document.querySelectorAll('.msg img')).filter((i) => i.complete && i.naturalWidth === 0).length,
     text: document.querySelector('.msg[data-platform] .text') ? document.querySelector('.msg[data-platform] .text').textContent : ''
   })`));
@@ -643,8 +644,14 @@ async function scenarioDegraded() {
   check('youtube is untouched — it has no catalogue to lose',
     state.ytEmotes > 0 && state.ytBadgeArt > 0,
     `ytEmotes=${state.ytEmotes} ytBadgeArt=${state.ytBadgeArt}`);
-  // Which is the point of keeping the text chips as a fallback.
+  // Which is the point of keeping the text chips as a fallback: a subscriber or
+  // a VIP badge is per-channel artwork nobody else has, so it becomes text.
   check('twitch badges degrade to text chips', state.chips > 0, `chips=${state.chips}`);
+  // The two roles are the exception, because the app ships those two pictures.
+  // A Twitch moderator normally draws Twitch's own sword; with the mirror down
+  // it draws ours, which is the same symbol, rather than dropping to letters.
+  check('twitch roles fall back to the bundled artwork, not to text',
+    state.twRoleIcons >= 2, `twRoleIcons=${state.twRoleIcons}`);
   check('no broken images left on screen', state.broken === 0, `broken=${state.broken}`);
   check('the message text itself is intact', state.text.length > 0, JSON.stringify(state.text));
 }
@@ -692,6 +699,18 @@ app.whenReady().then(async () => {
     ytCustomEmotes: document.querySelectorAll('.msg img.emote[src*="/yt-emotes/_"]').length,
     ytBadgeArt: document.querySelectorAll('.msg img.badge-img[src*="/yt-badges/"]').length,
     ytChips: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .badge')).map(b => b.textContent),
+    roleIcons: Array.from(document.querySelectorAll('.msg img.badge-img[src*="/assets/badge-"]')).map((i) => ({
+      platform: i.closest('.msg').dataset.platform,
+      file: i.getAttribute('src').split('/').pop(),
+      title: i.title,
+      painted: i.getClientRects().length === 1,
+      decoded: i.naturalWidth > 0 && i.naturalHeight > 0,
+      masked: getComputedStyle(i).webkitMaskImage !== 'none' || getComputedStyle(i).maskImage !== 'none',
+      h: Math.round(i.getBoundingClientRect().height * 10) / 10,
+    })),
+    roleChips: document.querySelectorAll('.msg .badge.moderator, .msg .badge.broadcaster').length,
+    platImgH: Math.round(document.querySelector('.msg img.plat-img').getBoundingClientRect().height * 10) / 10,
+    twArtH: Math.round(document.querySelector('.msg img.badge-img[src*="/twitch-badges/"]').getBoundingClientRect().height * 10) / 10,
     ytNames: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).map(n => n.textContent),
     badges: document.querySelectorAll('.msg img.badge-img').length,
     ggIcons: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/chat-svg-icons/"]').length,
@@ -750,8 +769,43 @@ app.whenReady().then(async () => {
       `custom=${state.ytCustomEmotes}`);
     check('youtube membership badge artwork rendered', state.ytBadgeArt >= 1,
       `ytBadgeArt=${state.ytBadgeArt}`);
-    // YouTube publishes no artwork for the named roles, only the name.
-    check('youtube roles degrade to text chips', state.ytChips.includes('MOD') && state.ytChips.includes('HOST'),
+    // Neither YouTube nor GoodGame publishes artwork for a moderator or a
+    // channel owner, so the app draws its own — the same two symbols Twitch
+    // uses, so one glance reads the same on all three platforms.
+    const roles = state.roleIcons;
+    const at = (platform, file) => roles.filter((r) => r.platform === platform && r.file === file);
+    check('a youtube moderator draws the sword, not the letters MOD',
+      at('youtube', 'badge-moderator.svg').length >= 1, JSON.stringify(roles));
+    check('a youtube channel owner draws the camera',
+      at('youtube', 'badge-broadcaster.svg').length >= 1, JSON.stringify(roles));
+    check('a goodgame moderator draws the same sword',
+      at('goodgame', 'badge-moderator.svg').length >= 1, JSON.stringify(roles));
+    check('a goodgame HOST draws the same camera',
+      at('goodgame', 'badge-broadcaster.svg').length >= 1, JSON.stringify(roles));
+    // Present in the DOM proves nothing: the mask bug this project already had
+    // once left every badge visible and every badge the same shape. So: it is
+    // painted, the file it names actually decoded to pixels, and nothing is
+    // drawing it through a mask, which would throw the artwork away.
+    check('every role icon is painted, decoded and unmasked',
+      roles.length >= 4 && roles.every((r) => r.painted && r.decoded && !r.masked),
+      JSON.stringify(roles));
+    // The role each icon claims has to be the role it draws, or a colourblind
+    // user and a screen reader are both told the wrong thing.
+    check('each icon carries the tooltip for the role it draws',
+      roles.every((r) => /mod/i.test(r.title) === (r.file === 'badge-moderator.svg')),
+      JSON.stringify(roles.map((r) => r.file + ':' + r.title)));
+    check('no role is left as a text chip', state.roleChips === 0,
+      JSON.stringify(state.ytChips));
+    // Layout: these reuse the .badge-img rule Twitch artwork already used, so
+    // they must measure the same as it and as the platform logo beside them.
+    // A badge taller than --badge-size would push every line it appears on.
+    check('role icons measure exactly like the badges already on the line',
+      roles.every((r) => r.h === state.twArtH) && state.twArtH === state.platImgH,
+      `roles=${JSON.stringify(roles.map((r) => r.h))} twitch=${state.twArtH} plat=${state.platImgH}`);
+    // The membership badge is the one YouTube does send artwork for, and it is
+    // still that artwork rather than one of ours.
+    check('youtube roles no longer need a text chip, its member badge is unaffected',
+      state.ytChips.length === 0 && state.ytBadgeArt >= 1,
       JSON.stringify(state.ytChips));
     check('youtube nickname present', state.ytNames.includes('@northwind_ada'),
       JSON.stringify(state.ytNames));

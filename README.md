@@ -56,7 +56,9 @@ Locked, it vanishes again.
 - **Emotes** — Twitch native, 7TV, BetterTTV, FrankerFaceZ, GoodGame smiles,
   and YouTube's emoji and channel membership emoji.
 - **Badges** — real Twitch artwork (mod, VIP, founder, sub tiers, bits),
-  GoodGame's own chat icons, and YouTube membership badges.
+  GoodGame's own chat icons, and YouTube membership badges. Moderators and
+  channel owners get the same sword and camera whichever platform they are on,
+  since only Twitch publishes a picture of those two.
 - **Nickname colours** exactly as the site shows them, or lifted for contrast
   over a bright game.
 - **Any font** installed on your machine, any size.

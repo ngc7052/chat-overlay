@@ -1,11 +1,11 @@
 import type { PlatformName } from '../../main/types.js';
-import { nickColor, splitUrls, type MessagePart } from '../util.js';
+import { argbSwatch, nickColor, splitUrls, type MessagePart } from '../util.js';
 import { BaseSource } from './base.js';
 import {
   chatPageActions, chatPageUrl, chatStart, chatTarget, clientVersion, livePageUrl,
   parsePoll, pollBody, videoIdFromLivePage, YT_CHAT_POLL_URL, YT_POLL_MAX_MS, YT_POLL_MS,
 } from './innertube.js';
-import type { Badge, ChatMessage, SourceOptions } from './types.js';
+import type { Badge, ChatMessage, PaidInfo, SourceOptions } from './types.js';
 
 /**
  * YouTube live chat, read anonymously through the endpoint the watch page uses.
@@ -156,6 +156,167 @@ export function ytParts(runs: unknown, emotes: boolean): MessagePart[] {
     }
   }
   return parts;
+}
+
+/**
+ * A text node, in whichever of YouTube's shapes it arrived in.
+ *
+ * Three, because the migration below is visible right here: the `…Renderer`
+ * family writes `{ simpleText }` for a flat string and `{ runs: [{ text }] }`
+ * for a styled one, and the `…ViewModel` family writes `{ content }` with the
+ * styling moved out into a parallel `styleRuns` array this overlay has no use
+ * for. Reading all three is what lets one parser cover both spellings.
+ */
+export function ytText(node: unknown): string {
+  const simple = str(dig(node, 'simpleText')) || str(dig(node, 'content'));
+  if (simple) return simple;
+  const runs = dig(node, 'runs');
+  return Array.isArray(runs) ? runs.map((run) => str(dig(run, 'text'))).join('') : '';
+}
+
+/** The same, as parts — so emote artwork and links survive. */
+export function ytBody(node: unknown, emotes: boolean): MessagePart[] {
+  const runs = dig(node, 'runs');
+  if (Array.isArray(runs)) return ytParts(runs, emotes);
+  return splitUrls(str(dig(node, 'content')) || str(dig(node, 'simpleText')));
+}
+
+/** The one object inside a single-key wrapper, whatever that key is called. */
+function inner(node: unknown): unknown {
+  if (!node || typeof node !== 'object') return null;
+  for (const value of Object.values(node as Record<string, unknown>)) {
+    if (value && typeof value === 'object') return value;
+  }
+  return null;
+}
+
+/** Non-empty pieces of a line, joined — a note with nothing in it adds nothing. */
+function line(parts: (MessagePart[] | string)[], separator: string): MessagePart[] {
+  const out: MessagePart[] = [];
+  for (const piece of parts) {
+    const next = typeof piece === 'string' ? splitUrls(piece) : piece;
+    if (next.length === 0) continue;
+    if (out.length > 0) out.push({ type: 'text', value: separator });
+    out.push(...next);
+  }
+  return out;
+}
+
+/** What one item renderer contributes on top of the author fields every item has. */
+export interface YtItem {
+  parts: MessagePart[];
+  /** Where the author's name and badges are, when they are not on the item. */
+  from?: unknown;
+  paid?: PaidInfo;
+  /**
+   * Something that happened to the author rather than something they said, so
+   * it is drawn the way a `/me` is: the colon becomes a space and the line
+   * takes their colour. Kept as an ordinary chat message rather than one of
+   * BaseSource's `event` lines because it has an author, an id and a channel
+   * id — which is what lets a moderator take it down and the ignore list keep
+   * it out, neither of which reaches a system line.
+   */
+  action?: boolean;
+}
+
+/**
+ * The item renderers this overlay draws, keyed by the name with the spelling
+ * taken off — see ytItemKind.
+ *
+ * A table rather than a switch because the interesting half is the default:
+ * a name that is not in here is skipped in silence, which is what keeps a type
+ * YouTube ships tomorrow a message that does not appear rather than a chat that
+ * stops. The list is short on purpose — every entry is a shape that has been
+ * read off a live channel, because a superchat parsed into an empty amount is
+ * worse than one that was never drawn.
+ *
+ * Deliberately absent: `liveChatViewerEngagementMessage`, which is YouTube's
+ * own advice about guarding your privacy and belongs in YouTube's chat rather
+ * than over somebody's game, and `liveChatTickerPaidMessageItem`, which is the
+ * same superchat a second time for the ticker strip along the top — it never
+ * arrives inside `addChatItemAction`, and drawing it would double every one.
+ */
+export const YT_ITEMS: Record<string, (item: unknown, emotes: boolean) => YtItem> = {
+  liveChatTextMessage: (item, emotes) => ({ parts: ytBody(dig(item, 'message'), emotes) }),
+
+  /**
+   * A superchat. The amount is the platform's own formatted string and the
+   * tier is a colour — carried together, but only the first of them is allowed
+   * to be the message: see PaidInfo. A superchat with no text at all is
+   * ordinary and must still render, which is why `parts` may be empty here.
+   */
+  liveChatPaidMessage: (item, emotes) => ({
+    parts: ytBody(dig(item, 'message'), emotes),
+    paid: {
+      amount: ytText(dig(item, 'purchaseAmountText')),
+      // The header is the strip the amount sits in and is the saturated tier
+      // colour; the body is a paler wash of it that would not read as a chip.
+      swatch: argbSwatch(dig(item, 'headerBackgroundColor') ?? dig(item, 'bodyBackgroundColor')),
+    },
+  }),
+
+  /**
+   * A new member, and a member saying how long it has been.
+   *
+   * One renderer covers both: a milestone carries `headerPrimaryText`
+   * ("Member for 4 months") with the tier in `headerSubtext`, and a brand-new
+   * member carries only the subtext ("Welcome to <tier>!"). Whichever of the
+   * two arrived is what gets said, so neither has to be told apart.
+   */
+  liveChatMembershipItem: (item, emotes) => ({
+    action: true,
+    parts: line([
+      line([ytText(dig(item, 'headerPrimaryText')), ytText(dig(item, 'headerSubtext'))], ' · '),
+      ytBody(dig(item, 'message'), emotes),
+    ], ' — '),
+  }),
+
+  /** Somebody bought gift memberships: "Sent 5 <channel> gift memberships". */
+  liveChatSponsorshipsGiftPurchaseAnnouncement: (item) => ({
+    action: true,
+    // The author's name and badges are down inside the header on this one; the
+    // channel id is still on the item, which is what a ban is matched against.
+    from: inner(dig(item, 'header')),
+    parts: splitUrls(ytText(dig(inner(dig(item, 'header')), 'primaryText'))),
+  }),
+
+  /** And somebody received one: "received a gift membership by @…". */
+  liveChatSponsorshipsGiftRedemptionAnnouncement: (item, emotes) => ({
+    action: true,
+    parts: ytBody(dig(item, 'message'), emotes),
+  }),
+
+  /**
+   * A gift — "sent Tea money" — and the one member of this family YouTube has
+   * already moved: it arrives only as `giftMessageViewModel`, never as a
+   * renderer. It is the proof that the spelling-blind lookup is not
+   * speculative. It carries no `authorExternalChannelId`, so a ban that names
+   * one cannot reach it; nothing can be done about that from here.
+   */
+  giftMessage: (item) => ({ action: true, parts: splitUrls(ytText(dig(item, 'text'))) }),
+};
+
+/**
+ * The name of a renderer with its spelling taken off.
+ *
+ * YouTube is mid-migration from `…Renderer` to `…ViewModel` across exactly
+ * these types, and a live channel can hand over either for the same event —
+ * `giftMessageViewModel` has already flipped while its neighbours have not.
+ * Keying on the stem means the day one flips, it keeps being drawn instead of
+ * silently disappearing on the users who happen to be served the new client.
+ */
+export function ytItemKind(name: string): string {
+  return name.replace(/(?:Renderer|ViewModel)$/, '');
+}
+
+/** The renderer inside an item, if it is one this overlay knows how to draw. */
+function pick(item: unknown, emotes: boolean): { node: unknown; built: YtItem } | null {
+  if (!item || typeof item !== 'object') return null;
+  for (const [name, node] of Object.entries(item as Record<string, unknown>)) {
+    const build = YT_ITEMS[ytItemKind(name)];
+    if (build && node && typeof node === 'object') return { node, built: build(node, emotes) };
+  }
+  return null;
 }
 
 export class YouTubeSource extends BaseSource {
@@ -464,13 +625,13 @@ export class YouTubeSource extends BaseSource {
 
   handle(actions: unknown[]): void {
     for (const action of actions) {
-      const item = dig(action, 'addChatItemAction', 'item', 'liveChatTextMessageRenderer');
+      const item = dig(action, 'addChatItemAction', 'item');
       if (item) {
         const msg = this.toMessage(item);
         // The interval the server itself asked for, handed on so the feed can
         // let this batch out across it instead of in one frame. It is the
         // server's number and it moves, so nothing here assumes a value.
-        if (this.remember(msg.id)) this.onMessage(msg, this.pollMs);
+        if (msg && this.remember(msg.id)) this.onMessage(msg, this.pollMs);
         continue;
       }
       const removed = dig(action, 'removeChatItemAction', 'targetItemId');
@@ -487,25 +648,46 @@ export class YouTubeSource extends BaseSource {
         // mistake as a ban leaking across channels, which 1.3.0 already fixed.
         this.onRemove({ platform: 'youtube', channel: this.channel, userId: str(banned) });
       }
-      // Anything else — a superchat, a membership gift, a renderer YouTube
-      // introduced this morning — is skipped in silence. Switching on the full
-      // set would turn every new type into a chat that stops rather than a
+      // Anything else — a poll, a pinned banner, a renderer YouTube introduced
+      // this morning — is skipped in silence, and so is any item inside an
+      // `addChatItemAction` whose renderer is not in YT_ITEMS. Switching on the
+      // full set would turn every new type into a chat that stops rather than a
       // message that does not appear, and YouTube is mid-migration from
       // `…Renderer` to `…ViewModel` names across exactly these types.
     }
   }
 
 
-  toMessage(item: unknown): ChatMessage {
-    const name = str(dig(item, 'authorName', 'simpleText'));
+  /**
+   * One item from the chat, or null if it is a kind this overlay does not draw.
+   *
+   * Everything an item has in common lives here — the id, the author, the
+   * timestamp — and YT_ITEMS supplies only what differs. A superchat is
+   * therefore a chat message with an amount on it rather than a second kind of
+   * thing, which is also how it reads on screen.
+   */
+  toMessage(item: unknown): ChatMessage | null {
+    const found = pick(item, this.getConfig().emotes);
+    if (!found) return null;
+    const { node, built } = found;
+    // Nothing said and nothing paid is not a message. A shape that only half
+    // parsed — the day one of these types moves and takes a field name with it
+    // — would otherwise paint a blank line under somebody's name, which reads
+    // as a broken overlay rather than as one message that did not appear.
+    if (built.parts.length === 0 && !built.paid?.amount) return null;
+
+    // The author's name and badges are on the item itself for everything except
+    // a gift purchase, which nests them one level down inside its header.
+    const from = built.from ?? node;
+    const name = ytText(dig(from, 'authorName'));
     // Display names arrive with the handle's leading @; the login is what the
     // ignore list and the ban rules compare against.
     const login = name.replace(/^@/, '').toLowerCase();
-    const channelId = str(dig(item, 'authorExternalChannelId'));
-    const sentUsec = Number(dig(item, 'timestampUsec'));
+    const channelId = str(dig(node, 'authorExternalChannelId'));
+    const sentUsec = Number(dig(node, 'timestampUsec'));
 
     return {
-      id: this.key + ':' + (str(dig(item, 'id')) || `${this.now()}:${this.random()}`),
+      id: this.key + ':' + (str(dig(node, 'id')) || `${this.now()}:${this.random()}`),
       platform: 'youtube',
       channel: this.channel,
       userId: channelId,
@@ -513,9 +695,11 @@ export class YouTubeSource extends BaseSource {
       userLogin: login,
       // YouTube carries no colour of its own, so every name is the shared hash.
       color: nickColor(login || name),
-      badges: ytBadges(dig(item, 'authorBadges')),
-      parts: ytParts(dig(item, 'message', 'runs'), this.getConfig().emotes),
+      badges: ytBadges(dig(from, 'authorBadges')),
+      parts: built.parts,
       kind: 'chat',
+      ...(built.action ? { action: true } : {}),
+      ...(built.paid ? { paid: built.paid } : {}),
       ts: Number.isFinite(sentUsec) && sentUsec > 0 ? Math.round(sentUsec / 1000) : this.now(),
     };
   }

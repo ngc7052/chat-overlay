@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  debounce, ggColor, hashCode, hexToRgb, nickColor, readableColor, rgbToHsl, splitUrls,
-  timeString,
+  argbSwatch, debounce, ggColor, hashCode, hexToRgb, nickColor, readableColor, rgbToHsl,
+  splitUrls, timeString,
 } from '../../src/renderer/util.js';
 
 describe('hashCode', () => {
@@ -159,5 +159,32 @@ describe('debounce', () => {
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith('c');
     vi.useRealTimers();
+  });
+});
+
+describe('argbSwatch', () => {
+  /*
+   * The numbers are the ones YouTube actually sends, read off a live channel:
+   * an unsigned ARGB integer per superchat tier.
+   */
+  it('drops the alpha and keeps the colour', () => {
+    // 0xFFC2185B — the magenta of the ¥5,000 tier.
+    expect(argbSwatch(4290910299)?.bg).toBe('rgb(194, 24, 91)');
+  });
+
+  it('picks ink that can be read on a dark tier and on a bright one', () => {
+    // The dark tiers take white; a bright one (0xFFFFCA28) does not, which is
+    // the whole reason the ink is chosen rather than fixed.
+    expect(argbSwatch(4290910299)?.ink).toBe('#ffffff');
+    expect(argbSwatch(4294953512)?.ink).toBe('#0d1016');
+    // And the two ends of the range, which no tier uses but a future one might.
+    expect(argbSwatch(4278190080)?.ink).toBe('#ffffff');
+    expect(argbSwatch(4294967295)?.ink).toBe('#0d1016');
+  });
+
+  it('has no colour to offer when none arrived', () => {
+    expect(argbSwatch(undefined)).toBeNull();
+    expect(argbSwatch('#ff0000')).toBeNull();
+    expect(argbSwatch(Number.NaN)).toBeNull();
   });
 });

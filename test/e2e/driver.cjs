@@ -500,6 +500,21 @@ async function scenarioBurst() {
   check('and a ban in the same batch takes every one of that author down',
     moderated.troll === 0, `troll=${moderated.troll}`);
 
+  // Some of the batch were superchats, one of them the banned author's. A paid
+  // message is a chat message with an amount on it and nothing else — so it
+  // goes through the same queue, obeys the same cap, and the same ban reaches
+  // it. Assert both halves: the survivors are painted, the banned one is not.
+  const paid = JSON.parse(await q(`JSON.stringify({
+    painted: Array.from(document.querySelectorAll('.msg.paid .amount'))
+      .filter((a) => a.getClientRects().length > 0).length,
+    troll: Array.from(document.querySelectorAll('.msg.paid'))
+      .filter((m) => m.querySelector('.name') && m.querySelector('.name').textContent === '@troll').length
+  })`));
+  check('superchats inside a burst survive the queue and are painted',
+    paid.painted >= 3, JSON.stringify(paid));
+  check('and a ban in the same batch takes the superchat down too',
+    paid.troll === 0, JSON.stringify(paid));
+
   // The whole point: one write, not three hundred.
   check('the batch is written to the feed in one go, not one message at a time',
     rec.records <= 5 && rec.maxAdded >= 100,
@@ -862,6 +877,40 @@ app.whenReady().then(async () => {
     platImgH: Math.round(document.querySelector('.msg img.plat-img').getBoundingClientRect().height * 10) / 10,
     twArtH: Math.round(document.querySelector('.msg img.badge-img[src*="/twitch-badges/"]').getBoundingClientRect().height * 10) / 10,
     ytNames: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).map(n => n.textContent),
+    // Painted, not merely present: an amount that is in the DOM and invisible
+    // is the same as a superchat that was dropped.
+    ytAmounts: Array.from(document.querySelectorAll('.msg.paid .amount'))
+      .filter(a => a.getClientRects().length > 0).map(a => a.textContent),
+    ytTiers: Array.from(document.querySelectorAll('.msg.paid .amount'))
+      .map(a => [a.textContent, getComputedStyle(a).backgroundColor, getComputedStyle(a).color]),
+    // Everything a youtube line says, so the membership events can be read off
+    // the screen rather than off the transcript.
+    ytLines: Array.from(document.querySelectorAll('.msg[data-platform="youtube"]'))
+      .filter(m => m.getClientRects().length > 0)
+      .map(m => (m.querySelector('.name') ? m.querySelector('.name').textContent : '')
+        + (m.querySelector('.colon') ? m.querySelector('.colon').textContent : '')
+        + (m.querySelector('.text') ? m.querySelector('.text').textContent : '')),
+    ytActions: Array.from(document.querySelectorAll('.msg[data-platform="youtube"].action'))
+      .map(m => m.querySelector('.text').textContent),
+    // A superchat is a chat line with an amount on it, so nothing about it may
+    // be bigger than an ordinary line or reach for the mouse.
+    ytPaidShape: (() => {
+      const paid = document.querySelector('.msg.paid');
+      const plain = document.querySelector('.msg[data-platform="youtube"]:not(.paid):not(.system)');
+      if (!paid || !plain) return null;
+      const chip = paid.querySelector('.amount');
+      return {
+        font: getComputedStyle(paid).fontSize === getComputedStyle(plain).fontSize,
+        opacity: getComputedStyle(paid).opacity,
+        regions: Array.from(paid.querySelectorAll('*')).concat([paid])
+          .filter(el => getComputedStyle(el).webkitAppRegion === 'no-drag')
+          .map(el => el.className),
+        animation: getComputedStyle(chip).animationName + '/' + getComputedStyle(chip).transitionProperty,
+        shadow: getComputedStyle(chip).textShadow,
+        // The accent down the side is an inset shadow, so it takes no space.
+        accent: getComputedStyle(paid).boxShadow
+      };
+    })(),
     badges: document.querySelectorAll('.msg img.badge-img').length,
     ggIcons: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/chat-svg-icons/"]').length,
     emotes: document.querySelectorAll('.msg img.emote').length,
@@ -959,6 +1008,70 @@ app.whenReady().then(async () => {
       JSON.stringify(state.ytChips));
     check('youtube nickname present', state.ytNames.includes('@northwind_ada'),
       JSON.stringify(state.ytNames));
+
+    /* ------------------------------------------------- superchats and members */
+    // Both superchats in the transcript, painted, with the amount as text —
+    // which is the half of the design that does not depend on being able to
+    // tell one tier colour from another.
+    check('a superchat is painted with its amount on it',
+      state.ytAmounts.includes('¥5,000') && state.ytAmounts.includes('$2.00'),
+      JSON.stringify(state.ytAmounts));
+    // Only the chip is coloured, and it is coloured with what YouTube sent:
+    // 0xFFC2185B — the magenta read off a real ¥5,000 superchat — and
+    // 0xFFFFCA28 for a bright one. The ink follows the background, because
+    // white on that yellow cannot be read.
+    const magenta = state.ytTiers.find((t) => t[0] === '¥5,000');
+    const yellow = state.ytTiers.find((t) => t[0] === '$2.00');
+    check('the amount is drawn in the tier colour the platform sent',
+      magenta && magenta[1] === 'rgb(194, 24, 91)' && magenta[2] === 'rgb(255, 255, 255)',
+      JSON.stringify(magenta));
+    check('and a bright tier gets ink that can be read on it',
+      yellow && yellow[1] === 'rgb(255, 202, 40)' && yellow[2] === 'rgb(13, 16, 22)',
+      JSON.stringify(yellow));
+    // A superchat sent with no message is ordinary, and must still render —
+    // with no colon left dangling after the name.
+    check('a superchat sent with no message still renders, and ends cleanly',
+      state.ytLines.includes('@sable_orbit'), JSON.stringify(state.ytLines.slice(0, 24)));
+    // Quiet: same size as any other line, no motion on the chip, and no
+    // surface that steals the drag region the feed is.
+    check('a superchat reads as a chat line, not a billboard',
+      state.ytPaidShape && state.ytPaidShape.font
+      && state.ytPaidShape.animation === 'none/all'
+      && state.ytPaidShape.regions.length === 0,
+      JSON.stringify(state.ytPaidShape));
+    // The chip carries its own solid background instead, which is the same
+    // thing the badges do and the reason they survive a bright scene.
+    check('the amount does not lean on the feed text-shadow to be legible',
+      state.ytPaidShape && state.ytPaidShape.shadow === 'none', JSON.stringify(state.ytPaidShape));
+    check('the tier is marked down the side of the line too, taking no space',
+      state.ytPaidShape && /inset/.test(state.ytPaidShape.accent)
+      && state.ytPaidShape.accent.includes('rgb(194, 24, 91)'),
+      JSON.stringify(state.ytPaidShape));
+
+    // Memberships: a new member, a milestone with the member's own words, a
+    // gift purchase, a gift landing on somebody, and the one type YouTube has
+    // already renamed to a ViewModel.
+    const events = state.ytActions.join('\n');
+    check('a new member is announced', events.includes('Welcome to Lantern Club!'), events);
+    check('a membership milestone carries the tier and what they wrote',
+      events.includes('Member for 2 months · Lantern Club — best two months of streams yet'), events);
+    check('gift memberships bought are announced',
+      events.includes('Sent 5 Northlight gift memberships'), events);
+    check('and a gift landing on somebody',
+      events.includes('received a gift membership by @Tidewrack'), events);
+    check('the one type YouTube has already renamed still renders',
+      events.includes('sent Tea money'), events);
+    // Membership lines are about the author rather than something they said, so
+    // they take the same shape a /me does: a space instead of a colon.
+    check('a membership reads as a sentence, not as the member saying it out loud',
+      state.ytLines.includes('@HollowPine Welcome to Lantern Club!'),
+      JSON.stringify(state.ytLines));
+
+    // The forgiving path, end to end: a renderer nobody has ever heard of sits
+    // in the middle of the transcript. It must cost exactly one message.
+    check('a renderer the app has never seen is skipped, and the chat carries on',
+      state.ytNames.length === 19 && state.ytNames.includes('@GraceOfHerons'),
+      `yt lines=${state.ytNames.length}`);
 
     check('url highlighted', state.urls >= 1, `urls=${state.urls}`);
     check('goodgame nickname present', state.names.includes('КотБаюн'));

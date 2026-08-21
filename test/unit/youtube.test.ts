@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PROBE_GRACE_MS } from '../../src/renderer/sources/base.js';
 import { YT_CHAT_POLL_URL } from '../../src/renderer/sources/innertube.js';
 import {
-  YouTubeSource, YT_IDLE_MS, YT_NOT_LIVE_MS, ytBadges, ytParts,
+  YouTubeSource, YT_IDLE_MS, YT_NOT_LIVE_MS, ytBadges, ytBody, ytItemKind, ytParts, ytText,
 } from '../../src/renderer/sources/youtube.js';
 import type { ChatMessage, RemoveRequest, SourceOptions } from '../../src/renderer/sources/types.js';
 
@@ -55,6 +55,102 @@ function chatItem(text: string, over: Record<string, unknown> = {}) {
     },
   };
 }
+
+/*
+ * The item shapes below were read off live channels rather than invented — a
+ * superchat parsed into an empty amount is worse than one that was skipped —
+ * and are the same objects with the tracking, context menus and reply buttons
+ * taken out. `headerBackgroundColor` really does arrive as an unsigned ARGB
+ * integer: 4290910299 is 0xFFC2185B, the magenta of YouTube's ¥5,000 tier.
+ */
+
+/** A superchat. `message` is absent on the many that are sent with no text. */
+function paidItem(amount: string, text?: string, over: Record<string, unknown> = {}) {
+  return {
+    addChatItemAction: {
+      item: {
+        liveChatPaidMessageRenderer: {
+          id: 'sc-1',
+          timestampUsec: '1700000000000000',
+          authorName: { simpleText: '@bigspender' },
+          authorExternalChannelId: 'UCpaid',
+          purchaseAmountText: { simpleText: amount },
+          headerBackgroundColor: 4290910299,
+          headerTextColor: 4294967295,
+          bodyBackgroundColor: 4293467747,
+          ...(text === undefined ? {} : { message: { runs: [{ text }] } }),
+          ...over,
+        },
+      },
+    },
+  };
+}
+
+/** A membership milestone, and — with `over` — a brand-new member. */
+function memberItem(over: Record<string, unknown> = {}) {
+  return {
+    addChatItemAction: {
+      item: {
+        liveChatMembershipItemRenderer: {
+          id: 'mem-1',
+          timestampUsec: '1700000000000000',
+          authorExternalChannelId: 'UCmember',
+          authorName: { simpleText: '@regular' },
+          headerPrimaryText: { runs: [{ text: 'Member for ' }, { text: '4' }, { text: ' months' }] },
+          headerSubtext: { simpleText: 'Inner Circle' },
+          ...over,
+        },
+      },
+    },
+  };
+}
+
+const giftPurchaseItem = (over: Record<string, unknown> = {}) => ({
+  addChatItemAction: {
+    item: {
+      liveChatSponsorshipsGiftPurchaseAnnouncementRenderer: {
+        id: 'gift-1',
+        timestampUsec: '1700000000000000',
+        authorExternalChannelId: 'UCgifter',
+        header: {
+          liveChatSponsorshipsHeaderRenderer: {
+            authorName: { simpleText: '@generous' },
+            primaryText: {
+              runs: [
+                { text: 'Sent ', bold: true }, { text: '5', bold: true },
+                { text: ' Northlight', bold: true }, { text: ' gift memberships', bold: true },
+              ],
+            },
+            authorBadges: [{ liveChatAuthorBadgeRenderer: {
+              customThumbnail: { thumbnails: [{ url: 'mem16' }, { url: 'mem32' }] },
+              tooltip: 'Member (6 months)',
+            } }],
+          },
+        },
+        ...over,
+      },
+    },
+  },
+});
+
+const giftRedemptionItem = () => ({
+  addChatItemAction: {
+    item: {
+      liveChatSponsorshipsGiftRedemptionAnnouncementRenderer: {
+        id: 'redeem-1',
+        timestampUsec: '1700000000000000',
+        authorExternalChannelId: 'UClucky',
+        authorName: { simpleText: '@lucky' },
+        message: {
+          runs: [
+            { text: 'received a gift membership by ', italics: true },
+            { text: '@generous', bold: true, italics: true },
+          ],
+        },
+      },
+    },
+  },
+});
 
 const frame = (actions: unknown[], continuation: string | null, wrapper = 'invalidationContinuationData') => ({
   continuationContents: {
@@ -241,6 +337,266 @@ describe('ytParts', () => {
 });
 
 /* -------------------------------------------------------------------- connect */
+
+/* ------------------------------------------------------------- text shapes */
+
+/**
+ * The migration seen from underneath. The `…Renderer` family writes a flat
+ * string as `{ simpleText }` and a styled one as `{ runs: [{ text }] }`; the
+ * `…ViewModel` family writes `{ content }` and moves the styling into a
+ * parallel array. Reading all three is what lets one parser cover both
+ * spellings of every type below.
+ */
+describe('ytText and ytBody', () => {
+  it('reads all three of the shapes a line of text arrives in', () => {
+    expect(ytText({ simpleText: '¥5,000' })).toBe('¥5,000');
+    expect(ytText({ content: '¥5,000', styleRuns: [{ startIndex: 0, length: 6 }] })).toBe('¥5,000');
+    expect(ytText({ runs: [{ text: 'Member for ' }, { text: '4' }, { text: ' months' }] }))
+      .toBe('Member for 4 months');
+  });
+
+  it('is empty rather than broken when the node is not there at all', () => {
+    expect(ytText(null)).toBe('');
+    expect(ytText({ runs: 'not an array' })).toBe('');
+    expect(ytBody(null, true)).toEqual([]);
+  });
+
+  it('keeps emotes and links out of a body, whichever shape it came in', () => {
+    expect(ytBody({ runs: [{ text: 'see https://example.com' }] }, true).map((p) => p.type))
+      .toEqual(['text', 'url']);
+    expect(ytBody({ content: 'see https://example.com' }, true).map((p) => p.type))
+      .toEqual(['text', 'url']);
+    expect(ytBody({ simpleText: 'plain' }, true)).toEqual([{ type: 'text', value: 'plain' }]);
+  });
+});
+
+/* ---------------------------------------------------------------- the items */
+
+describe('what a chat item turns into', () => {
+  const drawn = async (...actions: unknown[]) => {
+    const h = harness({ pages: livePages(), polls: [frame(actions, 'N1')] });
+    await h.source.connect();
+    await h.advance(1);
+    return h.chat();
+  };
+  const said = (m: ChatMessage | undefined) =>
+    (m?.parts ?? []).map((p) => (p.type === 'emote' ? `[${p.name}]` : p.value)).join('');
+
+  it('draws a superchat as a chat message with the amount on it', async () => {
+    const [msg] = await drawn(paidItem('¥5,000', 'thanks for the stream'));
+    expect(msg?.kind).toBe('chat');
+    expect(msg?.user).toBe('@bigspender');
+    expect(msg?.userId).toBe('UCpaid');
+    expect(said(msg)).toBe('thanks for the stream');
+    // The amount is the platform's own formatted string, kept verbatim: this
+    // app has no business reformatting a currency it does not understand.
+    expect(msg?.paid?.amount).toBe('¥5,000');
+    // 0xFFC2185B, the magenta tier — the alpha byte dropped and an ink chosen
+    // that can be read on it.
+    expect(msg?.paid?.swatch).toEqual({ bg: 'rgb(194, 24, 91)', ink: '#ffffff' });
+  });
+
+  it('draws a superchat that was sent with no message at all', async () => {
+    // Which is ordinary — a great many are the amount and nothing else — and
+    // was the case most likely to be dropped by a parser that assumed text.
+    const [msg] = await drawn(paidItem('$2.00'));
+    expect(msg?.paid?.amount).toBe('$2.00');
+    expect(msg?.parts).toEqual([]);
+  });
+
+  it('keeps a superchat legible when the tier arrives with no colour', async () => {
+    const [msg] = await drawn(paidItem('€1.00', 'hi', {
+      headerBackgroundColor: undefined, bodyBackgroundColor: undefined,
+    }));
+    expect(msg?.paid).toEqual({ amount: '€1.00', swatch: null });
+  });
+
+  it('falls back to the body colour when only that one arrived', async () => {
+    const [msg] = await drawn(paidItem('€1.00', 'hi', { headerBackgroundColor: undefined }));
+    expect(msg?.paid?.swatch?.bg).toBe('rgb(233, 30, 99)');
+  });
+
+  it('renders the emotes and links inside a superchat like any other message', async () => {
+    const [msg] = await drawn(paidItem('¥500', undefined, {
+      message: { runs: [
+        { text: 'see https://example.com/clip ' },
+        { emoji: { emojiId: '🔥', shortcuts: [':fire:'], image: { thumbnails: [{ url: 'big.png' }] } } },
+      ] },
+    }));
+    expect(msg?.parts.map((p) => p.type)).toEqual(['text', 'url', 'text', 'emote']);
+  });
+
+  it('says how long a member has been one, as something they did not say', async () => {
+    const [msg] = await drawn(memberItem());
+    // An action, so the colon becomes a space and the line reads as a sentence
+    // rather than as the member announcing their own tenure out loud.
+    expect(msg?.action).toBe(true);
+    expect(msg?.user).toBe('@regular');
+    expect(said(msg)).toBe('Member for 4 months · Inner Circle');
+  });
+
+  it('welcomes a brand-new member, who has no tenure to report yet', async () => {
+    const [msg] = await drawn(memberItem({
+      headerPrimaryText: undefined,
+      headerSubtext: { runs: [{ text: 'Welcome to ' }, { text: 'Inner Circle' }, { text: '!' }] },
+    }));
+    expect(said(msg)).toBe('Welcome to Inner Circle!');
+  });
+
+  it('carries the words a member wrote on their milestone', async () => {
+    const [msg] = await drawn(memberItem({ message: { runs: [{ text: 'best year yet' }] } }));
+    expect(said(msg)).toBe('Member for 4 months · Inner Circle — best year yet');
+  });
+
+  it('draws gift memberships bought, with the buyer as the author', async () => {
+    const [msg] = await drawn(giftPurchaseItem());
+    expect(msg?.action).toBe(true);
+    // The name and the badges are nested inside the header on this one; the
+    // channel id a ban would name is still on the item itself.
+    expect(msg?.user).toBe('@generous');
+    expect(msg?.userId).toBe('UCgifter');
+    expect(msg?.badges.map((b) => b.title)).toEqual(['Member (6 months)']);
+    expect(said(msg)).toBe('Sent 5 Northlight gift memberships');
+  });
+
+  it('and gift memberships received', async () => {
+    const [msg] = await drawn(giftRedemptionItem());
+    expect(msg?.action).toBe(true);
+    expect(msg?.user).toBe('@lucky');
+    expect(said(msg)).toBe('received a gift membership by @generous');
+  });
+
+  it('says nothing at all for an item that arrived with nothing in it', async () => {
+    // A gift purchase whose header is missing, and a text message with no text:
+    // half-parsed shapes that would otherwise paint a blank line under a name.
+    expect(await drawn(
+      giftPurchaseItem({ header: undefined }),
+      // A header that is there but holds nothing an author could be read out of.
+      giftPurchaseItem({ header: { liveChatSponsorshipsHeaderRenderer: 'moved' } }),
+      { addChatItemAction: { item: { liveChatTextMessageRenderer: { id: 'empty' } } } },
+    )).toEqual([]);
+  });
+
+  /**
+   * The migration. YouTube is renaming these types from `…Renderer` to
+   * `…ViewModel`, one at a time — `giftMessageViewModel` has already gone and
+   * its neighbours have not — and a live channel can hand over either spelling
+   * for the same event. The lookup is keyed on the name with the spelling
+   * taken off, so the day one flips it keeps being drawn.
+   */
+  describe('either spelling of the same event', () => {
+    it('draws the gift message YouTube has already moved to a ViewModel', async () => {
+      // Read off a live channel: the ViewModel family writes its text as
+      // `{ content }` with the styling in a parallel array, where the renderer
+      // family writes `{ simpleText }` or `{ runs }`.
+      const [msg] = await drawn({
+        addChatItemAction: {
+          item: {
+            giftMessageViewModel: {
+              id: 'gm-1',
+              text: { content: 'sent Tea money', styleRuns: [{ startIndex: 0, length: 14 }] },
+              authorName: { content: '@stargazer', styleRuns: [{ startIndex: 0, length: 10 }] },
+              giftImage: { sources: [{ url: 'tea.png', width: 480 }] },
+            },
+          },
+        },
+      });
+      expect(msg?.user).toBe('@stargazer');
+      expect(said(msg)).toBe('sent Tea money');
+      expect(msg?.action).toBe(true);
+    });
+
+    it('draws a superchat that arrives under the ViewModel name', async () => {
+      const [msg] = await drawn({
+        addChatItemAction: {
+          item: {
+            liveChatPaidMessageViewModel: {
+              id: 'sc-vm',
+              timestampUsec: '1700000000000000',
+              authorName: { content: '@bigspender' },
+              authorExternalChannelId: 'UCpaid',
+              purchaseAmountText: { content: '¥5,000' },
+              headerBackgroundColor: 4290910299,
+              message: { content: 'thanks' },
+            },
+          },
+        },
+      });
+      expect(msg?.paid).toEqual({ amount: '¥5,000', swatch: { bg: 'rgb(194, 24, 91)', ink: '#ffffff' } });
+      expect(said(msg)).toBe('thanks');
+      expect(msg?.userId).toBe('UCpaid');
+    });
+
+    it('draws a membership that arrives under the ViewModel name', async () => {
+      const [msg] = await drawn({
+        addChatItemAction: {
+          item: {
+            liveChatMembershipItemViewModel: {
+              id: 'mem-vm',
+              timestampUsec: '1700000000000000',
+              authorName: { content: '@regular' },
+              authorExternalChannelId: 'UCmember',
+              headerPrimaryText: { content: 'Member for 4 months' },
+            },
+          },
+        },
+      });
+      expect(msg?.action).toBe(true);
+      expect(said(msg)).toBe('Member for 4 months');
+    });
+
+    it('leaves a name it does not know alone, whichever way it is spelled', () => {
+      expect(ytItemKind('liveChatPaidMessageRenderer')).toBe('liveChatPaidMessage');
+      expect(ytItemKind('liveChatPaidMessageViewModel')).toBe('liveChatPaidMessage');
+      // Neither suffix: left exactly as it came, so it matches nothing.
+      expect(ytItemKind('liveChatSomethingElse')).toBe('liveChatSomethingElse');
+    });
+  });
+
+  /**
+   * Moderation has to reach a superchat the same way it reaches anything else.
+   * A paid message is a chat message with an amount on it, not a second kind
+   * of thing, so it carries the author's channel id and the feed's own rules
+   * do the rest — including the ones that run before it has been painted.
+   */
+  it('lets a ban take a superchat down along with the rest of the author', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([
+        paidItem('¥5,000', 'thanks'),
+        { removeChatItemByAuthorAction: { externalChannelId: 'UCpaid' } },
+      ], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    expect(h.chat()[0]?.userId).toBe('UCpaid');
+    expect(h.removals[0]).toEqual({ platform: 'youtube', channel: 'somechannel', userId: 'UCpaid' });
+  });
+
+  it('lets a single deletion take a superchat down by its own id', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([
+        paidItem('¥5,000', 'thanks'),
+        { removeChatItemAction: { targetItemId: 'sc-1' } },
+      ], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    expect(h.chat()[0]?.id).toBe('youtube:somechannel:sc-1');
+    expect(h.removals[0]).toEqual({ ids: ['youtube:somechannel:sc-1'] });
+  });
+
+  it('does not replay a superchat that was already in the page backlog', async () => {
+    const h = harness({
+      pages: livePages('rFZHOHl-L8A', { actions: [paidItem('¥5,000', 'thanks')] }),
+      polls: [frame([paidItem('¥5,000', 'thanks')], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    expect(h.chat()).toHaveLength(1);
+  });
+});
 
 describe('connecting', () => {
   it('resolves a channel to its live stream and reads the unfiltered chat', async () => {
@@ -484,7 +840,13 @@ describe('polling', () => {
     const h = harness({
       pages: livePages(),
       polls: [frame([
-        { addChatItemAction: { item: { giftMessageViewModel: { anything: true } } } },
+        { addChatItemAction: { item: { liveChatSomethingShippedThisMorningRenderer: { id: 'x' } } } },
+        { addChatItemAction: { item: { somethingShippedThisMorningViewModel: { id: 'y' } } } },
+        // A renderer that is not an object, an item that is not one, and an
+        // action carrying no item at all.
+        { addChatItemAction: { item: { liveChatTextMessageRenderer: 'not an object' } } },
+        { addChatItemAction: { item: 'moved somewhere else entirely' } },
+        { addChatItemAction: {} },
         { addLiveChatTickerItemAction: {} },
         { somethingIntroducedThisMorning: {} },
         chatItem('still here'),
@@ -492,8 +854,34 @@ describe('polling', () => {
     });
     await h.source.connect();
     await h.advance(1);
-    expect(h.text()).toContain('still here');
+    // One message, and it is the one that was understood: nothing was invented
+    // for the seven actions that were not, and nothing threw.
+    expect(h.chat().map((m) => m.parts.map((p) => (p.type === 'emote' ? '' : p.value)).join('')))
+      .toEqual(['still here']);
     expect(h.statuses.at(-1)?.state).toBe('online');
+  });
+
+  /**
+   * The superchat ticker along the top of YouTube's own chat repeats every
+   * paid message that already came down as a chat item. It arrives under its
+   * own action, never inside `addChatItemAction`, and drawing it would put
+   * every superchat in the feed twice.
+   */
+  it('does not draw the ticker copy of a superchat it has already drawn', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([
+        paidItem('¥5,000', 'thanks'),
+        { addLiveChatTickerItemAction: { item: { liveChatTickerPaidMessageItemRenderer: {
+          id: 'ticker', showItemEndpoint: { showLiveChatItemEndpoint: { renderer: {
+            liveChatPaidMessageRenderer: { id: 'sc-1', purchaseAmountText: { simpleText: '¥5,000' } },
+          } } },
+        } } } },
+      ], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    expect(h.chat().filter((m) => m.paid)).toHaveLength(1);
   });
 
   it('makes a message an unreadable id could not identify anyway', async () => {

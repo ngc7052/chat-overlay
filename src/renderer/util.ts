@@ -115,3 +115,35 @@ export function splitUrls(text: string): MessagePart[] {
   if (last < text.length) out.push({ type: 'text', value: text.slice(last) });
   return out;
 }
+
+/** A solid colour and the ink that stays readable on it. */
+export interface Swatch { bg: string; ink: string }
+
+/**
+ * A platform's own tier colour, turned into something safe to paint on.
+ *
+ * YouTube sends its superchat colours as unsigned ARGB integers, and the tiers
+ * span the whole range from a dark magenta to a bright yellow — so a fixed ink
+ * is unreadable on half of them. The ink is chosen from the background's
+ * relative luminance rather than taken from the `headerTextColor` YouTube
+ * sends beside it, which arrives semi-transparent and would have to be
+ * composited against a background this app is not drawing.
+ *
+ * The alpha byte is dropped: these are chips over arbitrary game footage, and
+ * a translucent one is exactly the thing the feed's whole legibility story
+ * exists to avoid.
+ */
+export function argbSwatch(value: unknown): Swatch | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const n = Math.round(value) >>> 0;
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  // sRGB relative luminance, which is what tells a yellow tier from a red one.
+  const lin = (c: number): number => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return { bg: `rgb(${r}, ${g}, ${b})`, ink: luminance > 0.36 ? '#0d1016' : '#ffffff' };
+}

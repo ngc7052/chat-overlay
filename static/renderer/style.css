@@ -457,6 +457,41 @@ body:not(.locked) .msg .url {
 body:not(.locked) .msg .url:hover { color: #c2dcff; }
 .msg .mention { color: #ffd479; font-weight: 800; }
 
+/*
+ * A superchat, and a membership event.
+ *
+ * Deliberately quiet. This is an overlay over somebody's game, so a paid
+ * message reads as a chat line with an amount on it rather than as a billboard:
+ * no motion, no growing, nothing that reflows, and no surface the mouse has to
+ * be able to reach. The amount is a chip drawn exactly the way a badge is
+ * drawn, because that is the mechanism this feed already trusts to stay legible
+ * over a bright scene — a solid background and no text shadow. Its colours come
+ * from the platform's own tier and are set inline; the amount inside it is
+ * text, so the tier colour is never the only thing saying what was paid.
+ *
+ * The accent down the left is an inset box-shadow rather than a border: a
+ * border would take space and move the line, and the padding that balances it
+ * is static, so nothing here changes size when the pointer goes near it.
+ */
+.msg .amount {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 0.8em;
+  font-weight: 800;
+  letter-spacing: .01em;
+  vertical-align: 0.06em;
+  text-shadow: none;
+  background: #55607a;
+  color: #fff;
+}
+
+.msg.paid {
+  padding-left: 7px;
+  box-shadow: inset 3px 0 0 var(--paid-accent, #55607a);
+}
+
 .msg.action .text { font-style: italic; }
 .msg.system { opacity: .78; font-style: italic; font-size: calc(var(--font-size) * .85); }
 .msg.system .text { color: #b9c6dc; }

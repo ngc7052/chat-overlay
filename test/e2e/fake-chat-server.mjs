@@ -148,13 +148,31 @@ export const YOUTUBE_SCRIPT = [
   { at: 300, user: '@northwind_ada', text: 'first time catching this one live', badges: ['MODERATOR'] },
   { at: 1000, user: '@quiet_lantern', text: 'that transition though ', emoji: ['fire'] },
   { at: 1700, user: '@marrow_and_moss', text: 'chat is flying ', emoji: ['face_with_tears_of_joy'], member: 'Member (2 months)' },
+  // A superchat with a message on it, in the magenta of YouTube's ¥5,000 tier.
+  { at: 2100, user: '@Tidewrack', event: 'paid', amount: '¥5,000', tier: 4290910299, text: 'take the week off, you have earned it' },
   { at: 2400, user: '@Tidewrack', text: 'been waiting all week for this ', emoji: ['partying_face'] },
+  // A brand-new member. No tenure yet, so only the welcome line comes down.
+  { at: 2800, user: '@HollowPine', event: 'member', welcome: 'Welcome to Lantern Club!' },
   { at: 3100, user: '@northwind_ada', text: 'clip at https://example.com/clip', badges: ['MODERATOR'] },
+  // A superchat with no message at all, which is ordinary — and in a bright
+  // tier (0xFFFFCA28), which is the case white text cannot be read on.
+  { at: 3500, user: '@sable_orbit', event: 'paid', amount: '$2.00', tier: 4294953512 },
   { at: 3800, user: '@sable_orbit', text: 'no words ', emoji: ['red_heart', 'red_heart'] },
+  // A renderer nobody here has ever heard of, sat in the middle of the
+  // transcript: the chat must walk straight past it and carry on.
+  { at: 4100, event: 'unknown' },
   { at: 4500, user: '@marrow_and_moss', text: 'members know ', emoji: ['_channelBLINK'], member: 'Member (2 months)' },
+  // A member of two months saying so, with the tier and their own words.
+  { at: 4900, user: '@marrow_and_moss', event: 'member', tenure: 'Member for 2 months', tier_name: 'Lantern Club', text: 'best two months of streams yet', member: 'Member (2 months)' },
   { at: 5200, user: '@HollowPine', text: 'how is this only 40 minutes in ', emoji: ['thinking_face'] },
+  // Gift memberships bought, and one of them landing on somebody.
+  { at: 5600, user: '@Tidewrack', event: 'giftPurchase', count: 5, member: 'Member (6 months)' },
   { at: 5900, user: '@Tidewrack', text: 'straight up ', emoji: ['rocket'] },
+  { at: 6200, user: '@quiet_lantern', event: 'giftRedemption', from: '@Tidewrack' },
   { at: 6600, user: '@quiet_lantern', text: 'earned every bit of it ', emoji: ['clapping_hands'] },
+  // The one type YouTube has already renamed: it arrives only as a ViewModel,
+  // with its text in `content` rather than in `runs`.
+  { at: 7000, user: '@sable_orbit', event: 'gift', gift: 'Tea money' },
   { at: 7300, user: '@sable_orbit', text: 'i need a nap after that ', emoji: ['yawning_face'] },
   { at: 8000, user: '@GraceOfHerons', text: 'thanks for streaming, all', badges: ['OWNER'] },
 ];
@@ -323,6 +341,100 @@ function noChatPage() {
   return `<!doctype html><html><body><script>window["ytInitialData"] = ${JSON.stringify(data)};</script></body></html>`;
 }
 
+/**
+ * The paid and membership items, in the shapes read off live channels.
+ *
+ * Field names, nesting and the unsigned-ARGB tier colours are the real ones —
+ * a fixture that invented them would let a parser that reads the wrong key
+ * pass here and show an empty amount in front of a real viewer. `giftMessage`
+ * is the odd one out on purpose: YouTube has already renamed it, so it exists
+ * only as a ViewModel, with its text in `content` instead of in `runs`.
+ */
+function ytEventItem(m, origin, index, badges) {
+  const id = `yt-msg-${index}`;
+  const usec = String(Date.now() * 1000);
+  const author = {
+    authorName: { simpleText: m.user },
+    authorExternalChannelId: m.authorId ?? `UCauthor${index}`,
+    ...(badges.length ? { authorBadges: badges } : {}),
+  };
+  if (m.event === 'paid') {
+    return {
+      liveChatPaidMessageRenderer: {
+        id, timestampUsec: usec, ...author,
+        purchaseAmountText: { simpleText: m.amount },
+        headerBackgroundColor: m.tier,
+        headerTextColor: 4294967295,
+        bodyBackgroundColor: m.tier,
+        // Absent entirely on a superchat sent with no message, which is what
+        // a great many of them are.
+        ...(m.text ? { message: { runs: [{ text: m.text }] } } : {}),
+      },
+    };
+  }
+  if (m.event === 'member') {
+    return {
+      liveChatMembershipItemRenderer: {
+        id, timestampUsec: usec, ...author,
+        // A milestone carries both; a brand-new member carries only the subtext.
+        ...(m.tenure ? { headerPrimaryText: { runs: [{ text: 'Member for ' }, { text: '2' }, { text: ' months' }] } } : {}),
+        headerSubtext: m.welcome ? { runs: [{ text: m.welcome }] } : { simpleText: m.tier_name },
+        ...(m.text ? { message: { runs: [{ text: m.text }] } } : {}),
+      },
+    };
+  }
+  if (m.event === 'giftPurchase') {
+    return {
+      liveChatSponsorshipsGiftPurchaseAnnouncementRenderer: {
+        id, timestampUsec: usec,
+        authorExternalChannelId: m.authorId ?? `UCauthor${index}`,
+        // The author's name and badges are one level down inside the header on
+        // this renderer alone.
+        header: {
+          liveChatSponsorshipsHeaderRenderer: {
+            authorName: { simpleText: m.user },
+            primaryText: {
+              runs: [
+                { text: 'Sent ', bold: true }, { text: String(m.count), bold: true },
+                { text: ' Northlight', bold: true }, { text: ' gift memberships', bold: true },
+              ],
+            },
+            ...(badges.length ? { authorBadges: badges } : {}),
+            image: { thumbnails: [{ url: `${origin}/yt-badges/member-2.png` }] },
+          },
+        },
+      },
+    };
+  }
+  if (m.event === 'giftRedemption') {
+    return {
+      liveChatSponsorshipsGiftRedemptionAnnouncementRenderer: {
+        id, timestampUsec: usec, ...author,
+        message: {
+          runs: [
+            { text: 'received a gift membership by ', italics: true },
+            { text: m.from, bold: true, italics: true },
+          ],
+        },
+      },
+    };
+  }
+  if (m.event === 'gift') {
+    return {
+      giftMessageViewModel: {
+        id,
+        text: { content: `sent ${m.gift}`, styleRuns: [{ startIndex: 0, length: 5 + m.gift.length }] },
+        authorName: { content: m.user, styleRuns: [{ startIndex: 0, length: m.user.length }] },
+        giftImage: { sources: [{ url: `${origin}/yt-badges/member-2.png`, width: 480 }] },
+      },
+    };
+  }
+  // A renderer this overlay has never heard of. Must be walked past without a
+  // word and without stopping the chat, which is the whole reason the item
+  // lookup is a table with a default rather than an exhaustive switch.
+  return { liveChatSomethingShippedThisMorningViewModel: { id, timestampUsec: usec, ...author } };
+}
+
 /** One scripted line, in the shape `get_live_chat` answers with. */
 function ytItem(m, origin, index) {
   const runs = [];
@@ -361,6 +473,7 @@ function ytItem(m, origin, index) {
       },
     });
   }
+  if (m.event) return { addChatItemAction: { item: ytEventItem(m, origin, index, badges) } };
   return {
     addChatItemAction: {
       item: {
@@ -424,10 +537,15 @@ export async function startFakeChat({
       const doomed = moderate && i === n - 40;
       const troll = moderate && (i === n - 30 || i === n - 20 || i === n - 10);
       if (doomed) doomedId = `yt-msg-${ordinal}`;
+      // A busy channel is where the superchats are, so some of the batch are
+      // paid — including one of the banned author's, which has to come down
+      // with the rest of them. Spaced so none of them lands on a moderated line.
+      const paid = i % 25 === 24 || (troll && i === n - 20);
       actions.push(ytItem({
         user: doomed ? '@doomed' : troll ? '@troll' : `@${tag}_${i}`,
         text: `${tag} ${i}`,
         ...(troll ? { authorId: 'UCbanned' } : {}),
+        ...(paid ? { event: 'paid', amount: '¥1,000', tier: 4290910299 } : {}),
       }, origin, ordinal));
     }
     if (moderate) {

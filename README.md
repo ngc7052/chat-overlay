@@ -59,6 +59,9 @@ Locked, it vanishes again.
   GoodGame's own chat icons, and YouTube membership badges. Moderators and
   channel owners get the same sword and camera whichever platform they are on,
   since only Twitch publishes a picture of those two.
+- **Superchats and memberships** — a YouTube superchat reads as a chat line
+  with the amount on it, in the tier colour YouTube gave it; new members,
+  membership milestones and gifted memberships appear as they happen.
 - **Nickname colours** exactly as the site shows them, or lifted for contrast
   over a bright game.
 - **Any font** installed on your machine, any size.

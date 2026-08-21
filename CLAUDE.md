@@ -100,7 +100,7 @@ is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
 |---|---|
-| default | messages, badges, emotes, colours, lock, settings, drag regions |
+| default | messages, badges, emotes, colours, superchats, memberships, lock, settings, drag regions |
 | `--scenario=drop` | both sockets terminated mid-transcript with no close frame — the app must notice, back off, reconnect and carry on, with nobody pressing anything |
 | `--scenario=stall` | both sockets held open and simply muted, in both directions — no close frame ever comes, so only the liveness watchdog can tell this apart from a quiet channel. It has to probe, get nothing back, say so and reconnect. `OVERLAY_TEST_WATCHDOG_MS` shrinks the wait for the run; every other scenario gets the shipped minutes |
 | `--scenario=degraded` | every catalogue endpoint 503 — Twitch's own emotes and GoodGame's icons still render (they need no lookup), third-party emotes and Twitch badge artwork quietly do not, and not one message is lost |
@@ -108,7 +108,7 @@ is the one thing a real install rarely stays on:
 | `--scenario=trials` | the same payload after three launches that never reported in — quarantined, moved aside, bundled one runs instead |
 | `--scenario=yt-offline` | a YouTube channel that is not live for the first six seconds — the state neither socket has. Nothing is broken, so it says so in the feed once, waits on its own slow cadence rather than a failure curve, and connects itself the moment a stream starts |
 | `--scenario=yt-ended` | a YouTube stream that ends mid-chat, while the channel page goes on advertising it for a few more seconds — the app must report the loss, decline to re-resolve it in a hot loop, and settle back to "not live" |
-| `--scenario=burst` | one poll answer carrying 300 messages, with a timeout and a ban for lines *inside the same batch* — what a busy YouTube channel does and what neither socket ever produces. Asserts the batch is written to the feed once rather than 300 times, that nothing over the cap is built at all, and that order, moderation, the cap, auto-scroll and message lifetimes all survive the queue. Prints the layout count and the longest main-thread block, which is where the before/after numbers come from |
+| `--scenario=burst` | one poll answer carrying 300 messages, with a timeout and a ban for lines *inside the same batch* — what a busy YouTube channel does and what neither socket ever produces. Asserts the batch is written to the feed once rather than 300 times, that nothing over the cap is built at all, and that order, moderation, the cap, auto-scroll and message lifetimes all survive the queue — superchats among them, including one the ban takes down. Prints the layout count and the longest main-thread block, which is where the before/after numbers come from |
 | `--scenario=rhythm` | a channel talking steadily at one, eight and thirty messages a second, answered at the 1300ms YouTube asks a busy chat to wait — the shape of a poll rather than its cost. Records every write into the feed: how many messages it carried, how far it moved the text, and how long since the last one. Asserts the feed is written a message at a time rather than in lumps, that nothing is lost or held past its interval, and that a quiet channel is not paced at all. Prints the before/after playout numbers |
 | `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
 
@@ -345,10 +345,38 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   matching by name takes the impersonated regular's messages down along with the
   impersonator. Same class of bug as a ban leaking across channels, which 1.3.0
   fixed.
-- **Parse one YouTube renderer type and ignore every other action in silence.**
-  YouTube is mid-migration from `…Renderer` to `…ViewModel` names across
-  superchats and membership gifts. Switching exhaustively turns every type they
-  add into a chat that stops, instead of a message that does not appear.
+- **Look YouTube's item renderers up in a table, and ignore a miss in silence.**
+  `YT_ITEMS` in `src/renderer/sources/youtube.ts` holds the handful worth
+  drawing — text, superchats, memberships, gift memberships, gifts. Anything
+  else is skipped without a word. Switching exhaustively turns every type
+  YouTube adds into a chat that stops, instead of a message that does not
+  appear. Every entry in the table is a shape that was read off a live channel:
+  a superchat parsed into an empty amount is worse than one that was skipped.
+  Deliberately absent are `liveChatViewerEngagementMessage` (YouTube's own
+  advice about guarding your privacy), the `…Ticker…` items (the strip along
+  the top of YouTube's chat, which repeats every superchat already delivered)
+  and `liveChatPaidSticker` (nobody has captured one to check the field names
+  against).
+- **The table is keyed on the name with the spelling taken off.** YouTube is
+  mid-migration from `…Renderer` to `…ViewModel` across exactly these types,
+  one at a time — `giftMessageViewModel` has already gone and its neighbours
+  have not — and a live channel can be served either spelling for the same
+  event. `ytItemKind` strips the suffix so both land on one entry, and the
+  field readers take `{ simpleText }`, `{ runs }` and the ViewModel family's
+  `{ content }` alike. A type that flips overnight keeps being drawn.
+- **A superchat is a chat message with an amount on it.** Not a second kind of
+  thing: it carries the author's channel id, so a ban reaches it; it goes
+  through the same queue, cap and lifetime; and it is drawn at the same size as
+  any other line. The amount is the platform's own formatted string and is
+  *text* — YouTube's tier colour is a redundant second channel, so the line
+  still says how much was paid to somebody who cannot tell the tiers apart. The
+  chip is drawn the way a badge is, with its own solid background and no text
+  shadow, because that is the mechanism this feed already trusts over a bright
+  scene. A superchat with no message at all is ordinary and must still render.
+- **Membership events are actions, not system lines.** Twitch's subs go through
+  `system(…, 'event')`, which has no author. YouTube's arrive with an author,
+  an id and a channel id, so they are ordinary chat messages with `action` set
+  — the colon becomes a space — and moderation and the ignore list reach them.
 
 ## Things that will waste your time
 

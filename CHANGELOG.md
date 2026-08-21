@@ -1,5 +1,79 @@
 # chat-overlay
 
+## 1.4.0
+
+### Minor Changes
+
+- 2e7a63e: Moderators and channel owners now get the same badge on every platform. YouTube
+  and GoodGame publish no artwork for those two roles, so in icons mode they drew
+  the letters MOD and HOST beside a Twitch message showing a sword and a camera
+  for exactly the same thing. The app now ships its own sword and camera and draws
+  them wherever the platform sent none — which also means a Twitch moderator keeps
+  a badge when the badge mirror is unreachable, instead of falling back to text.
+  Choosing text badges in the settings still gives text, and off still gives
+  nothing.
+- 41761bf: YouTube live chat, alongside Twitch and GoodGame. Add a channel the same way —
+  Settings → **+ Add channel** → YouTube → `@somechannel` — and its chat joins the
+  same feed, with YouTube's emoji, channel membership emoji, membership badges and
+  moderator/owner/verified markers. Read-only and anonymous like the other two: no
+  login, no API key, no Google account.
+  
+  A YouTube channel is a stream rather than an address, so a YouTube row behaves a
+  little differently: it connects while that channel is live, says so in the feed
+  when it is not, and picks the next stream up on its own without you touching
+  anything. Paste a stream's own link instead of the channel name to pin one.
+  
+  A channel that is not streaming is a resting state and not a fault, so the top
+  bar stays quiet about it — no "1 of 2 offline" over your game for the evenings
+  somebody does not stream. It only counts channels that should be carrying chat
+  and are not.
+- f4bd733: Show YouTube superchats and membership events, which used to be dropped in
+  silence.
+  
+  A superchat now reads as an ordinary chat line with the amount on it — the
+  amount as YouTube formatted it, in a chip painted with YouTube's own tier
+  colour, and readable without it. A superchat sent with no message at all still
+  appears, which is how a good many of them are sent. New members, membership
+  milestones, gifted memberships and gifts appear as they happen, in the author's
+  own colour.
+  
+  Nothing is louder for it: no motion, nothing that resizes, and the same size,
+  opacity, lifetime and message cap as every other line. Bans and timeouts reach
+  a superchat exactly as they reach anything else.
+  
+  A type YouTube has not shipped yet is still skipped in silence rather than
+  stopping the chat, and the two spellings YouTube is mid-migration between —
+  `…Renderer` and `…ViewModel` — are both understood for every type.
+
+### Patch Changes
+
+- fd73f4c: A YouTube channel can be added without the `@`. Typing `PlayWithDeepx` now finds
+  the same channel as `@PlayWithDeepx`; before, only the form with the `@` worked
+  and the row sat on an `HTTP 404`. The name is still looked up exactly as typed
+  first, so a long-standing row holding a legacy custom url — `PewDiePie`,
+  `marquesbrownlee` — keeps meaning the channel it has always meant, and the `@`
+  form is only asked for when that misses.
+- 4812561: YouTube chat now flows instead of arriving in clumps. YouTube is polled rather
+  than streamed, so one answer carries everything said since the last one — on a
+  busy channel that meant ten lines appearing at once and then nothing at all for
+  over a second, again and again, while Twitch and GoodGame trickled alongside it.
+  Each answer is now let out across the interval the server itself asked for, so
+  chat reads at the pace it was said. Nothing is held back longer than that
+  interval, and a quiet channel, a socket, and a burst too big for the message cap
+  are all painted immediately as before.
+- 0433670: Keep up with a busy chat. YouTube hands the overlay a whole poll's worth of
+  messages at once, and each one was being appended and scrolled to on its own,
+  which forced the browser to lay the page out again before the next could be
+  added — so a busy channel arrived faster than it could be drawn and the feed
+  visibly fell behind. Messages are now collected and drawn together on the next
+  frame. On a 300-message batch that is 2 layouts instead of 302, one write into
+  the feed instead of 300, and 17ms of blocked rendering instead of 67ms; the
+  messages the message cap was about to delete are no longer built at all.
+  
+  The feed can also be scrolled back now. Once there were more messages than
+  fitted the window, the ones above it could not be reached — so scrolling up to
+  read something that had gone past silently did nothing.
+
 ## 1.3.0
 
 ### Minor Changes

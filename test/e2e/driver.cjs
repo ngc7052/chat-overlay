@@ -854,7 +854,16 @@ app.whenReady().then(async () => {
   // The scripted transcript finishes just under 10s in.
   await wait(11000);
 
-  const state = JSON.parse(await q(`JSON.stringify({
+  // Heights are measured off one example element, and --only=<platform> is a
+  // legitimate run in which the other platforms' examples do not exist. A bare
+  // querySelector().getBoundingClientRect() threw there, which took the whole
+  // capture path down rather than the one assertion that wanted the number.
+  const state = JSON.parse(await q(`(() => {
+    const h = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? Math.round(el.getBoundingClientRect().height * 10) / 10 : null;
+    };
+    return JSON.stringify({
     msgs: document.querySelectorAll('.msg').length,
     chat: document.querySelectorAll('.msg[data-platform]').length,
     tw: document.querySelectorAll('.msg img.plat-img[alt="twitch"]').length,
@@ -874,8 +883,8 @@ app.whenReady().then(async () => {
       h: Math.round(i.getBoundingClientRect().height * 10) / 10,
     })),
     roleChips: document.querySelectorAll('.msg .badge.moderator, .msg .badge.broadcaster').length,
-    platImgH: Math.round(document.querySelector('.msg img.plat-img').getBoundingClientRect().height * 10) / 10,
-    twArtH: Math.round(document.querySelector('.msg img.badge-img[src*="/twitch-badges/"]').getBoundingClientRect().height * 10) / 10,
+    platImgH: h('.msg img.plat-img'),
+    twArtH: h('.msg img.badge-img[src*="/twitch-badges/"]'),
     ytNames: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).map(n => n.textContent),
     // Painted, not merely present: an amount that is in the DOM and invisible
     // is the same as a superchat that was dropped.
@@ -928,7 +937,8 @@ app.whenReady().then(async () => {
     // A border would resize the bar; the separator must be a box-shadow.
     barBorder: getComputedStyle(document.getElementById('bar')).borderBottomWidth,
     updateHidden: document.getElementById('btn-update').getClientRects().length === 0
-  })`));
+  });
+  })()`));
 
   console.log('\nrendered:', JSON.stringify({
     msgs: state.msgs, tw: state.tw, gg: state.gg, yt: state.yt, badges: state.badges, ggIcons: state.ggIcons,
@@ -1187,10 +1197,15 @@ app.whenReady().then(async () => {
   check('hovering reveals the channel names', await until(`${NAME_OPACITY} === '1'`));
   // Each dot sits with the name it stands for, rather than in a row of
   // anonymous dots with the names somewhere to their right.
+  // --only=<platform> configures that one channel, so what the bar should list
+  // is whatever run.mjs put in the config, not a fixed three.
+  const expectedPairs = [
+    ['twitch', 'tw/halcyon_tv'], ['goodgame', 'gg/vetroduy'], ['youtube', 'yt/northlight'],
+  ].filter(([platform]) => !ONLY || platform === ONLY).map(([, name]) => [true, name]);
   check('each dot is paired with its own channel name',
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map(
       (p) => [!!p.querySelector('.src-dot'), p.querySelector('.src-name').textContent]))`)
-      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy'], [true, 'yt/northlight']]),
+      === JSON.stringify(expectedPairs),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map((p) => p.textContent))`));
   // The bar is a drag region. If hovering resizes anything in it, Chromium
   // recomputes that region, which disturbs the pointer, which drops the hover,
@@ -1435,6 +1450,12 @@ app.whenReady().then(async () => {
   await snap('overlay-locked.png');
 
   if (MEDIA) {
+    // The run drove the update button on its way here, and a failed update
+    // writes its own lines into the feed. That is the harness talking, not the
+    // app, so the capture waits for the looping transcript to carry every
+    // system line off the top before it starts recording — otherwise the first
+    // frame of the demo, which is the one a reader sees, is a test artefact.
+    await until(`document.querySelectorAll('.msg.system').length === 0`, 60000);
     // Frames for the animation, captured from the locked overlay so the demo
     // shows the state people actually use.
     for (let i = 0; i < 40; i++) {

@@ -12,7 +12,7 @@ npm run typecheck          # tsc --noEmit
 npm test                   # unit tests
 npm run coverage           # unit + integration tests, and the 100% thresholds
 npm run e2e                # end-to-end against a local fake chat server
-npm run e2e:media          # re-capture the README demos (needs network)
+npm run e2e:media          # re-capture the three README demos (needs ffmpeg)
 npm run check              # typecheck + coverage + e2e — run this before pushing
 npm run build              # compile into app/
 ./build.sh --zip           # full portable build + update payload
@@ -143,6 +143,39 @@ what a user sees. Stand-in artwork was tried and thrown away: it looks
 plausible while the catalogue matches the wrong emote entirely, which is
 exactly the bug the run exists to catch. Adding an emote to a transcript means
 downloading its artwork too — see that directory's README.
+
+### The README demos
+
+The three GIFs in the README are captures of this same run — the real app, the
+same fake server, the same vendored artwork. Nothing in them is mocked up and
+nothing needs a live channel:
+
+```bash
+npm run e2e:media    # all three, a few minutes; needs a display and ffmpeg
+```
+
+`--only=<platform>` narrows the run to one channel, which is what makes a demo
+show one chat rather than three interleaved, and `--media` writes 40 frames
+half a second apart from the *locked* overlay — the state people actually use.
+`scripts/demo-gif.mjs` turns those frames into `docs/media/demo-<platform>.gif`
+and carries the reasoning for the encoding settings, of which `max_colors=64`
+is the one that decides the file size.
+
+Three things worth knowing before touching this:
+
+- **`--only` is a supported run, not a shortcut.** It has to stay green, or the
+  demos cannot be re-captured — and it failed silently for a while precisely
+  because nothing in `npm run e2e` exercises it. Anything that measures one
+  platform's example element, or expects a fixed list of three channels, needs
+  to cope with the other two being absent.
+- **The capture waits for the feed to be free of system lines.** The run drives
+  the update button on its way past, and a failed update writes its own lines
+  into the chat. They are the harness talking, and the first frame is the one a
+  reader sees.
+- **The transcript loops for a media run** — including YouTube's, which is a
+  poll rather than a socket and so loops by having the repeats already in the
+  script `ytPoll` walks. That keeps every item id distinct, which matters
+  because the renderer de-dups on them.
 
 ### The CSP exception
 

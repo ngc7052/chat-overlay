@@ -3,9 +3,21 @@
 Twitch, YouTube and GoodGame chat, on top of your game. Transparent,
 click-through, read-only — no login, no tokens.
 
-| Twitch | GoodGame |
-|---|---|
-| ![Twitch chat overlay](docs/media/demo-twitch.gif) | ![GoodGame chat overlay](docs/media/demo-goodgame.gif) |
+![Twitch chat overlay](docs/media/demo-twitch.gif)
+
+<details>
+<summary><b>The same feed on YouTube</b> — superchats with the amount on the line, new and gifted memberships</summary>
+
+![YouTube chat overlay](docs/media/demo-youtube.gif)
+
+</details>
+
+<details>
+<summary><b>…and on GoodGame</b> — its own chat icons and smiles</summary>
+
+![GoodGame chat overlay](docs/media/demo-goodgame.gif)
+
+</details>
 
 Locked, that is all there is: no window, no background, no scrollbar. Clicks go
 straight through to the game. Run several at once and they merge into one feed.

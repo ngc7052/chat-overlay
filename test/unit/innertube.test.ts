@@ -84,12 +84,37 @@ describe('jsonAfter', () => {
 
 describe('chatTarget', () => {
   const channel = (value: string) => ({ kind: 'channel', value });
+  /** A bare word: the literal path first, `@word` to fall back on. */
+  const bare = (value: string) => ({ kind: 'channel', value, alt: '@' + value });
   const video = (value: string) => ({ kind: 'video', value });
 
   it('takes a bare name, a handle and a channel id', () => {
-    expect(chatTarget('lofigirl')).toEqual(channel('lofigirl'));
+    expect(chatTarget('lofigirl')).toEqual(bare('lofigirl'));
     expect(chatTarget('  @LofiGirl  ')).toEqual(channel('@LofiGirl'));
     expect(chatTarget('UCSJ4gkVC6NrvII8umztf0Ow')).toEqual(channel('channel/UCSJ4gkVC6NrvII8umztf0Ow'));
+  });
+
+  /**
+   * The user's half of the bug this was written for: `PlayWithDeepx` answers
+   * 404 without its `@` and 200 with it, and typing the `@` is not something
+   * anyone should have to know to do. The other half is that a bare word is
+   * *also* a legacy custom url — `youtube.com/PewDiePie` still resolves — so
+   * the typed form is asked for first and the handle only when it misses.
+   * Nothing that works today can change which channel it means.
+   */
+  it('offers the handle as a fallback for a bare word, never the other way round', () => {
+    expect(chatTarget('PlayWithDeepx')).toEqual(bare('PlayWithDeepx'));
+    expect(chatTarget('PewDiePie')).toEqual(bare('PewDiePie'));
+    expect(chatTarget('youtube.com/PlayWithDeepx')).toEqual(bare('PlayWithDeepx'));
+    expect(chatTarget('https://www.youtube.com/PlayWithDeepx/live')).toEqual(bare('PlayWithDeepx'));
+    expect(chatTarget('some.old-name_1')).toEqual(bare('some.old-name_1'));
+    // Everything that is not a bare word already names one thing exactly, so
+    // there is nothing to fall back to and no second request to pay for.
+    expect(chatTarget('@PlayWithDeepx')?.alt).toBeUndefined();
+    expect(chatTarget('UCSJ4gkVC6NrvII8umztf0Ow')?.alt).toBeUndefined();
+    expect(chatTarget('youtube.com/c/LofiGirl')?.alt).toBeUndefined();
+    expect(chatTarget('youtube.com/user/Old')?.alt).toBeUndefined();
+    expect(chatTarget('youtube.com/watch?v=rFZHOHl-L8A')?.alt).toBeUndefined();
   });
 
   it('takes the urls people actually copy', () => {
@@ -116,8 +141,8 @@ describe('chatTarget', () => {
    * chat to anyone whose channel name happens to be that length.
    */
   it('never guesses that a bare word is a video id', () => {
-    expect(chatTarget('elevenchars')).toEqual(channel('elevenchars'));
-    expect(chatTarget('rFZHOHl-L8A')).toEqual(channel('rFZHOHl-L8A'));
+    expect(chatTarget('elevenchars')).toEqual(bare('elevenchars'));
+    expect(chatTarget('rFZHOHl-L8A')).toEqual(bare('rFZHOHl-L8A'));
   });
 
   it('refuses what it cannot make sense of', () => {

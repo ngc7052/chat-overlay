@@ -265,15 +265,15 @@ async function scenarioYtOffline() {
     await q(DOTS));
 
   check('the feed says the channel is not live, rather than leaving it blank',
-    await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 15000),
+    await until(`/not live — youtube\\/northlight/.test(document.body.textContent)`, 15000),
     await q(`document.body.textContent.slice(-300)`));
   check('and the dot says idle rather than error or offline',
-    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /yt\\/@northlight — idle — not live/.test(d.title))`, 15000),
+    await until(`Array.from(document.querySelectorAll('#status .src-dot')).some((d) => /yt\\/northlight — idle — not live/.test(d.title))`, 15000),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-dot')).map((d) => d.title))`));
 
   // Six seconds in the channel goes live. Nothing is pressed.
   check('it connects by itself once the channel goes live',
-    await until(`/connected — youtube\\/@northlight/.test(document.body.textContent)`, 30000),
+    await until(`/connected — youtube\\/northlight/.test(document.body.textContent)`, 30000),
     await q(`document.body.textContent.slice(-300)`));
   check('and the chat then arrives',
     await until(`document.querySelectorAll('.msg[data-platform="youtube"]').length > 0`, 20000));
@@ -301,13 +301,13 @@ async function scenarioYtEnded() {
 
   // Four seconds in the server stops offering a continuation.
   check('the end of the stream is noticed at once, not waited out',
-    await until(`/lost — youtube\\/@northlight/.test(document.body.textContent)`, 20000),
+    await until(`/lost — youtube\\/northlight/.test(document.body.textContent)`, 20000),
     await q(`document.body.textContent.slice(-300)`));
   check('the messages already on screen are left alone',
     Number(await q(`document.querySelectorAll('.msg[data-platform="youtube"]').length`)) >= before,
     `before=${before}`);
   check('and it goes back to looking rather than giving up',
-    await until(`/not live — youtube\\/@northlight/.test(document.body.textContent)`, 25000),
+    await until(`/not live — youtube\\/northlight/.test(document.body.textContent)`, 25000),
     await q(`document.body.textContent.slice(-300)`));
 
   /*
@@ -943,6 +943,13 @@ app.whenReady().then(async () => {
   if (!ONLY) {
     check('all three platforms rendered', state.tw > 0 && state.gg > 0 && state.yt > 0,
       `tw=${state.tw} gg=${state.gg} yt=${state.yt}`);
+    // The youtube row is configured as `northlight`, with no `@` on it. The
+    // fake server answers that path with the 404 real YouTube gives for a
+    // channel that has only a handle, so chat on the screen is proof the app
+    // asked again with the `@` on rather than reporting an error.
+    check('a youtube channel typed without its @ connects and delivers chat',
+      state.yt > 0 && state.dots.some((d) => d.includes('yt/northlight')),
+      `yt=${state.yt} dots=${state.dots.join(' | ')}`);
     check('every scripted message arrived', state.msgs >= 37, `msgs=${state.msgs}`);
     check('twitch badge artwork rendered', state.badges >= 3, `badges=${state.badges}`);
     check('goodgame icons rendered', state.ggIcons >= 3, `ggIcons=${state.ggIcons}`);
@@ -1083,7 +1090,7 @@ app.whenReady().then(async () => {
     check('the dot names the channel it stands for',
       state.dots.some((d) => d.includes('tw/halcyon_tv'))
       && state.dots.some((d) => d.includes('gg/vetroduy'))
-      && state.dots.some((d) => d.includes('yt/@northlight')),
+      && state.dots.some((d) => d.includes('yt/northlight')),
       JSON.stringify(state.dots));
 
     // What each state is actually painted as, measured on a dot the app made
@@ -1183,7 +1190,7 @@ app.whenReady().then(async () => {
   check('each dot is paired with its own channel name',
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map(
       (p) => [!!p.querySelector('.src-dot'), p.querySelector('.src-name').textContent]))`)
-      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy'], [true, 'yt/@northlight']]),
+      === JSON.stringify([[true, 'tw/halcyon_tv'], [true, 'gg/vetroduy'], [true, 'yt/northlight']]),
     await q(`JSON.stringify(Array.from(document.querySelectorAll('#status .src-pair')).map((p) => p.textContent))`));
   // The bar is a drag region. If hovering resizes anything in it, Chromium
   // recomputes that region, which disturbs the pointer, which drops the hover,

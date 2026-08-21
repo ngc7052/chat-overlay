@@ -30,10 +30,17 @@ interface Harness {
   statuses: { state: string; detail: string }[];
   timers: { fn: () => void; ms: number }[];
   warnings: string[];
+  paces: Array<number | undefined>;
 }
 
 function harness(overrides: Partial<SourceOptions> = {}): Harness {
   const messages: ChatMessage[] = [];
+  /**
+   * The pacing hint, which a socket must never send: see the `paceMs` argument
+   * in ../../src/renderer/sources/types.ts. These messages arrive one at a time
+   * as they are said, and holding one back a frame would be a regression.
+   */
+  const paces: Array<number | undefined> = [];
   const removals: RemoveRequest[] = [];
   const statuses: { state: string; detail: string }[] = [];
   const timers: { fn: () => void; ms: number }[] = [];
@@ -42,7 +49,7 @@ function harness(overrides: Partial<SourceOptions> = {}): Harness {
 
   const source = new TwitchSource({
     channel: 'Xqc',
-    onMessage: (m) => messages.push(m),
+    onMessage: (m, paceMs) => { messages.push(m); paces.push(paceMs); },
     onRemove: (r) => removals.push(r),
     onStatus: (_s, state, detail) => statuses.push({ state, detail }),
     getConfig: () => ({ emotes: true, thirdPartyEmotes: true, exactColors: false }),
@@ -56,7 +63,7 @@ function harness(overrides: Partial<SourceOptions> = {}): Harness {
   });
 
   source.connect();
-  return { source, socket: socket!, messages, removals, statuses, timers, warnings };
+  return { source, socket: socket!, messages, removals, statuses, timers, warnings, paces };
 }
 
 describe('twitchEmoteUrl', () => {
@@ -249,6 +256,21 @@ describe('TwitchSource connection', () => {
     const h = harness();
     h.socket.onmessage?.({ data: ':tmi.twitch.tv 001 justinfan1 :Welcome, GLHF!' });
     expect(h.statuses.some((s) => s.state === 'online')).toBe(true);
+  });
+
+  /**
+   * IRC hands one message over as it is said, so there is no lump to spread and
+   * nothing to name an interval for. The feed pacing in ../../src/renderer/feed.ts
+   * is opt-in for exactly this reason: a frame of delay added to a socket
+   * message would be a regression on the two platforms this was never about.
+   */
+  it('never asks the feed to pace it', () => {
+    const h = harness();
+    h.socket.onmessage?.({
+      data: '@display-name=Nero;user-id=1 :nero!nero@nero.tmi.twitch.tv PRIVMSG #xqc :hello',
+    });
+    expect(h.messages.at(-1)?.parts[0]).toEqual({ type: 'text', value: 'hello' });
+    expect(h.paces.every((p) => p === undefined)).toBe(true);
   });
 
   it('ignores commands it does not handle', () => {

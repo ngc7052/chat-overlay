@@ -390,8 +390,12 @@ export class YouTubeSource extends BaseSource {
     if (!poll) return this.streamGone();
 
     this.noteAlive();
-    this.handle(poll.actions);
+    // Before the actions, not after: what the messages in this answer are
+    // handed is the wait until the *next* one, which is the interval they have
+    // to be let out across. Reading it afterwards paces every batch against
+    // the interval of the batch before it.
     this.pollMs = poll.timeoutMs;
+    this.handle(poll.actions);
 
     if (poll.stale) return this.tokenStale();
     if (!poll.continuation) return this.streamGone();
@@ -463,7 +467,10 @@ export class YouTubeSource extends BaseSource {
       const item = dig(action, 'addChatItemAction', 'item', 'liveChatTextMessageRenderer');
       if (item) {
         const msg = this.toMessage(item);
-        if (this.remember(msg.id)) this.onMessage(msg);
+        // The interval the server itself asked for, handed on so the feed can
+        // let this batch out across it instead of in one frame. It is the
+        // server's number and it moves, so nothing here assumes a value.
+        if (this.remember(msg.id)) this.onMessage(msg, this.pollMs);
         continue;
       }
       const removed = dig(action, 'removeChatItemAction', 'targetItemId');

@@ -41,7 +41,7 @@ export abstract class BaseSource {
   emoteMap = new Map<string, { url: string; fallback?: string }>();
   badgeMap = new Map<string, { url: string; title: string }>();
 
-  protected readonly onMessage: (msg: ChatMessage) => void;
+  protected readonly onMessage: (msg: ChatMessage, paceMs?: number) => void;
   protected readonly onRemove: (req: RemoveRequest) => void;
   protected readonly onStatus: NonNullable<SourceOptions['onStatus']>;
   protected readonly getConfig: SourceOptions['getConfig'];

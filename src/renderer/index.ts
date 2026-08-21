@@ -111,6 +111,7 @@ const feed = new Feed<HTMLElement, ReturnType<typeof setTimeout>>({
   detach: (el) => el.remove(),
   fade: (el) => el.classList.add('fading'),
   schedule: (flush) => requestAnimationFrame(flush),
+  now: () => performance.now(),
   // The one layout read per batch, and the only place it happens.
   painted: () => { if (autoScroll) scrollToBottom(); },
   config: () => config,
@@ -292,8 +293,12 @@ function buildMessage(msg: ChatMessage): HTMLElement {
   return el;
 }
 
-function addMessage(msg: ChatMessage): void {
-  feed.add(msg);
+/**
+ * `paceMs` is how long the source expects to wait before its next arrival, and
+ * only a polling one names it. See ./feed for what the feed does with it.
+ */
+function addMessage(msg: ChatMessage, paceMs?: number): void {
+  feed.add(msg, paceMs);
 }
 
 function trimMessages(): void {

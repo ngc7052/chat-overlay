@@ -22,7 +22,9 @@
  * the settings panel opens and closes.
  */
 import { spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -70,9 +72,48 @@ const server = await startFakeChat({
 // %APPDATA%, where no package.json sits above it; inside the repo, node finds
 // the root's "type": "module" and refuses to load a staged payload as
 // CommonJS — an artefact of the harness that a real install never sees.
-const dataDir = path.join(os.tmpdir(), 'chat-overlay-e2e-profile');
-rmSync(dataDir, { recursive: true, force: true });
-mkdirSync(dataDir, { recursive: true });
+//
+// And a fresh directory per run, never a fixed name. It used to be one
+// `chat-overlay-e2e-profile` shared by every checkout on the machine, and the
+// run *began* by deleting it — so starting a run in one worktree pulled the
+// profile out from under a run already going in another, mid-flight, with
+// nothing in the output naming the cause. What that looked like was a staged
+// payload that was suddenly not there, or four hover assertions failing
+// alongside the one that says the pointer is over the window; both were filed
+// as flakes. `mkdtemp` ends it: nobody else's run can name this directory, and
+// this run deletes nobody else's.
+const PROFILE_PREFIX = 'chat-overlay-e2e-';
+// Unique names mean nothing overwrites the last run's directory, so something
+// has to remove them. A run that passes removes its own (`finish` below); a run
+// that fails keeps it, because a quarantined payload or a half-written config
+// is exactly what one wants to look at afterwards. This sweeps up what those
+// left behind on earlier days. Six hours is orders of magnitude longer than the
+// couple of minutes a full run takes, so a directory this old cannot belong to
+// a run that is still going — which is the entire point of the change.
+const STALE_MS = 6 * 60 * 60 * 1000;
+const now = Date.now();
+for (const name of readdirSync(os.tmpdir())) {
+  if (!name.startsWith(PROFILE_PREFIX)) continue;
+  const stale = path.join(os.tmpdir(), name);
+  // Somebody else's run may be removing the same directory at the same moment,
+  // and /tmp on a shared box holds things this user cannot stat. Neither is
+  // this run's problem.
+  try {
+    if (now - statSync(stale).mtimeMs > STALE_MS) rmSync(stale, { recursive: true, force: true });
+  } catch { /* not ours to tidy */ }
+}
+const dataDir = mkdtempSync(path.join(os.tmpdir(), PROFILE_PREFIX));
+
+/**
+ * The one way out of this script. The profile belongs to this run alone, so
+ * this run is what removes it — and only when it passed. A failure leaves it on
+ * disk and says where, so the state that produced the failure can be read.
+ */
+function finish(code) {
+  if (code === 0) rmSync(dataDir, { recursive: true, force: true });
+  else console.error(`\nprofile kept for inspection: ${dataDir}`);
+  process.exit(code);
+}
 
 const allSources = [
   { platform: 'twitch', channel: 'halcyon_tv', enabled: true },
@@ -199,19 +240,20 @@ if (scenario === 'crash') {
   for (const p of problems) console.error('  FAIL ' + p);
   if (problems.length) {
     console.error(`\ne2e FAILED: ${problems.length} check(s) failed`);
-    process.exit(1);
+    finish(1);
   }
   console.log('  ok  a payload that throws is quarantined, and the app relaunches without it');
   console.log('\ne2e OK');
-  process.exit(0);
+  finish(0);
 }
 
 if (code !== 0) {
   console.error(`\ne2e FAILED (exit ${code})`);
-  process.exit(code || 1);
+  finish(code || 1);
 }
 if (!out.includes('E2E PASS')) {
   console.error('\ne2e FAILED: driver did not report a pass');
-  process.exit(1);
+  finish(1);
 }
 console.log('\ne2e OK');
+finish(0);

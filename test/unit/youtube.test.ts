@@ -697,6 +697,111 @@ describe('connecting', () => {
     expect(h.chat()).toHaveLength(0);
   });
 
+  /*
+   * The bug: a channel created since 2022 has only a handle, so
+   * `youtube.com/PlayWithDeepx/live` is a 404 and `/@PlayWithDeepx/live` is the
+   * page — measured against real YouTube. Nobody should have to know to type
+   * the @. The typed form still goes first, because a bare word is also a
+   * legacy custom url that resolves on its own.
+   */
+  it('falls back to the handle when the name as typed is not a channel', async () => {
+    const h = harness({
+      pages: {
+        '/somechannel/live': new Error('HTTP 404'),
+        '/@somechannel/live': livePage('rFZHOHl-L8A'),
+        '/live_chat': chatPage(),
+      },
+      polls: [frame([chatItem('hello')], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+
+    expect(h.fetched[0]).toBe('https://www.youtube.com/somechannel/live');
+    expect(h.fetched[1]).toBe('https://www.youtube.com/@somechannel/live');
+    expect(h.statuses.map((st) => st.state)).toContain('online');
+    expect(h.text()).toContain('hello');
+  });
+
+  /**
+   * `ipcMain.handle` logs every rejection, so leaving the miss in place would
+   * write an `HTTP 404` into the log of a perfectly healthy channel every two
+   * minutes for as long as it is not streaming.
+   */
+  it('asks the form that answered first from then on, so the miss is paid once', async () => {
+    const h = harness({
+      pages: {
+        '/somechannel/live': new Error('HTTP 404'),
+        '/@somechannel/live': livePage(null),
+      },
+    });
+    await h.source.connect();
+    expect(h.fetched).toEqual([
+      'https://www.youtube.com/somechannel/live',
+      'https://www.youtube.com/@somechannel/live',
+    ]);
+
+    // Not live, so it comes back around on the slow cadence — and goes straight
+    // to the form that worked.
+    await h.advance(YT_NOT_LIVE_MS + 1);
+    expect(h.fetched.slice(2)).toEqual(['https://www.youtube.com/@somechannel/live']);
+  });
+
+  /**
+   * Remembering is only an ordering, never a decision. A channel that is
+   * renamed, or a page that fails once, must still resolve through the form
+   * that is left.
+   */
+  it('still tries the other form when the one it remembers stops answering', async () => {
+    const pages: Record<string, string | Error> = {
+      '/somechannel/live': new Error('HTTP 404'),
+      '/@somechannel/live': livePage(null),
+    };
+    const h = harness({ pages });
+    await h.source.connect();
+
+    pages['/@somechannel/live'] = new Error('HTTP 503');
+    pages['/somechannel/live'] = livePage(null);
+    await h.advance(YT_NOT_LIVE_MS + 1);
+    expect(h.fetched.slice(2)).toEqual([
+      'https://www.youtube.com/@somechannel/live',
+      'https://www.youtube.com/somechannel/live',
+    ]);
+    expect(h.statuses.at(-1)).toEqual({ state: 'idle', detail: 'not live' });
+  });
+
+  /** A channel that answers to the name as typed never pays for the second. */
+  it('does not ask for the handle when the name as typed answers', async () => {
+    const h = harness({ pages: livePages() });
+    await h.source.connect();
+    expect(h.fetched.filter((u) => u.includes('/@'))).toEqual([]);
+  });
+
+  it('reports the error of the form the user typed when neither is a channel', async () => {
+    const h = harness({
+      pages: {
+        '/somechannel/live': new Error('HTTP 404'),
+        '/@somechannel/live': new Error('HTTP 500'),
+      },
+    });
+    await h.source.connect();
+    expect(h.fetched).toHaveLength(2);
+    expect(h.statuses.at(-2)).toEqual({ state: 'error', detail: 'HTTP 404' });
+  });
+
+  /**
+   * `@name`, a channel id and a pasted url each name one thing exactly, so a
+   * miss is a miss — there is no second form to try and no second request.
+   */
+  it('has nothing to fall back to when the name already carries its @', async () => {
+    const h = harness({
+      channel: '@somechannel',
+      pages: { '/@somechannel/live': new Error('HTTP 404') },
+    });
+    await h.source.connect();
+    expect(h.fetched).toEqual(['https://www.youtube.com/@somechannel/live']);
+    expect(h.statuses.at(-2)).toEqual({ state: 'error', detail: 'HTTP 404' });
+  });
+
   it('gives up on a connect whose chat page arrives after it was destroyed', async () => {
     let source: { destroy(): void } | null = null;
     const h = harness({

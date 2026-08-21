@@ -676,6 +676,16 @@ export async function startFakeChat({
     }
 
     if (url.pathname.endsWith('/live')) {
+      // A channel that has only a handle — which is every channel made since
+      // 2022. Measured against real YouTube on 2026-08-21:
+      // `/PlayWithDeepx/live` is a 404 and `/@PlayWithDeepx/live` is the page,
+      // with no redirect between them. A single bare segment is refused here
+      // the same way, so the app has to ask again with the `@` on. The `/c/`,
+      // `/user/` and `/channel/` forms keep two segments and are left alone.
+      const segments = url.pathname.replace(/^\/+/, '').split('/');
+      if (segments.length === 2 && !segments[0].startsWith('@')) {
+        return res.writeHead(404).end('not a channel: ' + segments[0]);
+      }
       const elapsed = Date.now() - startedAt;
       const started = !ytLiveAfterMs || elapsed >= ytLiveAfterMs;
       const over = !!ytEndAfterMs && elapsed >= ytEndAfterMs;

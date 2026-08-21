@@ -3,7 +3,8 @@ import { argbSwatch, nickColor, splitUrls, type MessagePart } from '../util.js';
 import { BaseSource } from './base.js';
 import {
   chatPageActions, chatPageUrl, chatStart, chatTarget, clientVersion, livePageUrl,
-  parsePoll, pollBody, videoIdFromLivePage, YT_CHAT_POLL_URL, YT_POLL_MAX_MS, YT_POLL_MS,
+  parsePoll, pollBody, type Target, videoIdFromLivePage, YT_CHAT_POLL_URL, YT_POLL_MAX_MS,
+  YT_POLL_MS,
 } from './innertube.js';
 import type { Badge, ChatMessage, PaidInfo, SourceOptions } from './types.js';
 
@@ -350,6 +351,14 @@ export class YouTubeSource extends BaseSource {
   private pollEpoch = 0;
   /** Message ids already rendered, oldest first; see remember(). */
   private readonly seen = new Set<string>();
+  /**
+   * The form of the channel name YouTube last answered to, once one has.
+   *
+   * Nothing is trusted to it: it only decides which of the two forms is asked
+   * for first, and if the remembered one stops answering the other is tried
+   * exactly as it would have been. See livePage().
+   */
+  private channelPath: string | null = null;
   private readonly notLiveMs: number;
   private readonly httpText: NonNullable<SourceOptions['httpText']>;
   private readonly httpPost: NonNullable<SourceOptions['httpPost']>;
@@ -380,7 +389,7 @@ export class YouTubeSource extends BaseSource {
     try {
       const videoId = target.kind === 'video'
         ? target.value
-        : videoIdFromLivePage(await this.httpText(livePageUrl(target.value)));
+        : videoIdFromLivePage(await this.livePage(target));
       if (this.dead) return;
       if (!videoId) return this.notLive();
 
@@ -418,6 +427,47 @@ export class YouTubeSource extends BaseSource {
     this.noteAlive();
     this.handle(actions);
     this.pump(0);
+  }
+
+  /**
+   * The `/live` page of whichever form of the name YouTube actually has.
+   *
+   * A bare word is asked for exactly as the user typed it and only then as
+   * `@word`; chatTarget says why that order and not the other one. The cost is
+   * a request that misses, for a channel that has only a handle — which is
+   * every channel made since 2022, so it is the common case rather than the
+   * odd one. The miss itself is cheap, a 758-byte 404, but it is not free:
+   * `ipcMain.handle` logs every rejection, so a channel that is perfectly fine
+   * would write an `HTTP 404` into the log on connect and then every
+   * YT_NOT_LIVE_MS for as long as it is not streaming. Which form answered is
+   * therefore remembered, and paid once per run instead — see channelPath.
+   *
+   * The second form is tried on any failure rather than on a 404 specifically.
+   * The status arrives here as a message string across an IPC boundary, and a
+   * name YouTube has retired answers 30x — which `redirect: 'error'` turns into
+   * a failure carrying no status at all. Both mean the same thing here: ask for
+   * the other form before giving up. When both fail it is the error of the form
+   * that was tried *first* that is reported — on a fresh source that is the one
+   * the user typed.
+   */
+  private async livePage(target: Target): Promise<string> {
+    const forms = !target.alt
+      ? [target.value]
+      : this.channelPath === target.alt
+        ? [target.alt, target.value]
+        : [target.value, target.alt];
+
+    let failure: unknown = null;
+    for (const form of forms) {
+      try {
+        const html = await this.httpText(livePageUrl(form));
+        this.channelPath = form;
+        return html;
+      } catch (err) {
+        failure ??= err;
+      }
+    }
+    throw failure;
   }
 
   /**

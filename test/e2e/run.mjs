@@ -77,7 +77,12 @@ mkdirSync(dataDir, { recursive: true });
 const allSources = [
   { platform: 'twitch', channel: 'halcyon_tv', enabled: true },
   { platform: 'goodgame', channel: 'vetroduy', enabled: true },
-  { platform: 'youtube', channel: '@northlight', enabled: true },
+  // Deliberately without the `@`, which is how anyone reads a channel name
+  // aloud and what the settings box now accepts. The fake server answers a bare
+  // `/northlight/live` with the same 404 real YouTube gives for a channel that
+  // has only a handle, so this row proves the fallback end to end rather than
+  // in the parser alone.
+  { platform: 'youtube', channel: 'northlight', enabled: true },
 ];
 
 /**

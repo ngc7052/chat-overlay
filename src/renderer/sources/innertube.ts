@@ -60,6 +60,11 @@ export interface Target {
   /** 'video' — a specific stream. 'channel' — whatever that channel has live. */
   kind: 'video' | 'channel';
   value: string;
+  /**
+   * A second channel path to ask for when `value` turns out not to name a
+   * channel at all. Only a bare word has one — see chatTarget.
+   */
+  alt?: string;
 }
 
 /**
@@ -102,7 +107,24 @@ export function chatTarget(input: string): Target | null {
   if (/^@[\w.-]+$/.test(channel)) return { kind: 'channel', value: channel };
   if (/^UC[\w-]{22}$/.test(channel)) return { kind: 'channel', value: 'channel/' + channel };
   if (/^(?:channel|c|user)\/[\w.-]+$/.test(channel)) return { kind: 'channel', value: channel };
-  if (/^[\w.-]+$/.test(channel)) return { kind: 'channel', value: channel };
+  // A bare word is two things at once and nothing tells them apart from here.
+  // It can be a legacy custom url — `youtube.com/PewDiePie`, which predates
+  // handles, is still what that channel answers to, and is what a long-standing
+  // config row holds — or it can be a handle typed without its `@`, which is
+  // how anyone reads a channel name aloud and is the only form a channel
+  // created since 2022 has. Measured on 2026-08-21: `youtube.com/PewDiePie`,
+  // `/LinusTechTips`, `/lofigirl`, `/kurzgesagt` and `/marquesbrownlee` all
+  // answer 200, `/PlayWithDeepx` answers 404 while `/@PlayWithDeepx` answers
+  // 200, and `/@marquesbrownlee` answers 404 while the bare one does not. So
+  // both forms are live, neither covers the other, and the answer costs a
+  // request.
+  //
+  // The literal form goes first and `@word` is the fallback, so no row that
+  // resolves today can change which channel it means. Where both exist they
+  // agree — checked by externalId on all five above — but "where both exist"
+  // is not something this can know, and picking the handle first would silently
+  // move a working row to whoever holds the matching handle.
+  if (/^[\w.-]+$/.test(channel)) return { kind: 'channel', value: channel, alt: '@' + channel };
   return null;
 }
 

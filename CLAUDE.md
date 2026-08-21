@@ -341,10 +341,26 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
      app-region of its own contributes nothing; only an explicit `no-drag`
      subtracts. The settings panel, the resize corner, the scrollbar strip and
      the links in the feed all have to say so.
-  3. **Never resize a drag region on hover.** Chromium recomputes the region,
-     which disturbs the pointer, which drops the hover, which resizes it back —
-     a flicker loop several times a second. Hover may repaint; it may not
-     reflow. The e2e measures the bar cold and hovered to enforce it.
+  3. **Hover may repaint; it may not reflow.** Keep this as the standing
+     discipline for the bar — but know that the flicker it was written for is
+     history, so do not design around it as though it still binds.
+
+     The loop needed a path from *layout* back to *hover state*, and it had one
+     while the reveal was driven by CSS `:hover`: resizing the bar made Chromium
+     recompute the drag region, which disturbed the pointer, which dropped the
+     hover, which resized it back — several times a second. `a008ef1` moved that
+     signal to `src/main/pointer.ts`, which polls the OS cursor against the
+     window's own bounds. Neither of those can be touched by anything the page
+     does, so the loop has nothing left to close. Re-tested when the top bar was
+     redesigned: a prototype that deliberately reflowed the bar on hover — the
+     second dot jumping 81px — produced zero oscillation over four seconds under
+     a real pointer.
+
+     What is left is a cheap invariant worth keeping, not a law of the platform.
+     The e2e measures every element in the bar cold and hovered. It is worth
+     knowing that it did not always: until the top-bar work it compared only the
+     `#bar`, `#grip` and `#status` rects, all of which are flex-filled, so it
+     passed against a prototype that plainly reflowed the bar's interior.
 - **Two YouTube gates answer with a 200 and the wrong page**, so a client that
   meets either sees no error at all — only a channel that is mysteriously never
   live. Both were found by running the real app against real YouTube; neither

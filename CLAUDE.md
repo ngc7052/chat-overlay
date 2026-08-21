@@ -127,6 +127,25 @@ resolves module type from the nearest `package.json`, and inside the repo the
 root's `"type": "module"` makes a staged payload fail to load as CommonJS —
 which no real install, sitting under `%APPDATA%`, would ever hit.
 
+**Every run gets its own profile — `mkdtemp(chat-overlay-e2e-)` — and never a
+fixed name.** It was a fixed name once, `chat-overlay-e2e-profile`, shared by
+every checkout on the machine; worse, the run *began* by `rm -rf`-ing it. So
+starting a run in one worktree deleted the profile a run in another worktree was
+using, mid-flight, and nothing in either output named the cause. It cost this
+project two misdiagnoses in a day: four hover assertions that failed while the
+one asserting the pointer was over the window passed, filed as a pointer-poll
+flake; and a `--scenario=trials` launch failure that "did not reproduce". Both
+happened with two or three worktrees running `npm run check` at once. Do not
+reintroduce a fixed name to make anything easier — with `mkdtemp`, no other run
+can name this directory and this run deletes no other run's.
+
+What removes them: **a run that passes deletes its own profile; a run that fails
+keeps it and prints the path**, because a quarantined payload or a half-written
+config is what one wants to read afterwards. Those leftovers are swept by the
+next run, which removes any `chat-overlay-e2e-*` older than six hours — long
+enough that a directory that old cannot belong to a run still going, which is
+the whole point.
+
 Assert on what is *painted* — `getClientRects().length` — not on what an
 attribute claims. Two bugs in this project passed an attribute check while the
 element was plainly visible on screen.

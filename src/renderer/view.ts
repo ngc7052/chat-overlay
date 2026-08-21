@@ -60,6 +60,40 @@ export function visibleBadges(msg: ChatMessage, config: Config): Badge[] {
   return msg.badges;
 }
 
+/**
+ * What separates a name from the line that follows it.
+ *
+ * A colon, except for the two cases where one would be wrong: an event about
+ * the author rather than something they said — a `/me`, a membership — reads
+ * as a sentence and takes a space, and a superchat sent with no text at all,
+ * which is ordinary, would otherwise be left with a colon and nothing after it.
+ */
+export function nameSeparator(msg: ChatMessage): string {
+  if (msg.action) return ' ';
+  return msg.parts.length > 0 ? ':' : '';
+}
+
+/** The amount chip on a paid message: its text, and the colours to paint it in. */
+export interface PaidChip { text: string; bg: string; ink: string }
+
+/**
+ * The amount a viewer paid, ready to draw — or null, which is every ordinary
+ * message.
+ *
+ * The chip carries the amount as *text*, which is the whole point: YouTube's
+ * tier colour is a second, redundant channel, so the line still says how much
+ * was paid to somebody who cannot tell the tiers apart, and over a bright scene
+ * where the chip's own background is the only thing keeping it legible. A
+ * message that arrived with no colour is drawn in the same neutral grey an
+ * unrecognised badge gets — the amount does not stop being the message.
+ */
+export function paidChip(msg: ChatMessage): PaidChip | null {
+  const amount = (msg.paid?.amount ?? '').trim();
+  if (!amount) return null;
+  const swatch = msg.paid?.swatch;
+  return { text: amount, bg: swatch?.bg ?? '#55607a', ink: swatch?.ink ?? '#ffffff' };
+}
+
 /** CSS custom properties derived from the settings. */
 export function appearanceVars(config: Config): Record<string, string> {
   return {

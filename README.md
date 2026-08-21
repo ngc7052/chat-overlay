@@ -57,6 +57,9 @@ Locked, it vanishes again.
   and YouTube's emoji and channel membership emoji.
 - **Badges** — real Twitch artwork (mod, VIP, founder, sub tiers, bits),
   GoodGame's own chat icons, and YouTube membership badges.
+- **Superchats and memberships** — a YouTube superchat reads as a chat line
+  with the amount on it, in the tier colour YouTube gave it; new members,
+  membership milestones and gifted memberships appear as they happen.
 - **Nickname colours** exactly as the site shows them, or lifted for contrast
   over a bright game.
 - **Any font** installed on your machine, any size.

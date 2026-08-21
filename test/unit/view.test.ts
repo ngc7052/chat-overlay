@@ -3,9 +3,9 @@ import { normaliseConfig } from '../../src/main/config.js';
 import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage, ConnectionState } from '../../src/renderer/sources/types.js';
 import {
-  appearanceVars, badgeRendering, emptyHint, messagesToRemove, PIN_SLACK_PX, pinnedToBottom,
-  platformIconPath, platformMarker, platformTag, barAlert, plainText, shouldDrop, sourceDotClass,
-  statusDots, visibleBadges,
+  appearanceVars, badgeRendering, emptyHint, messagesToRemove, nameSeparator, paidChip,
+  PIN_SLACK_PX, pinnedToBottom, platformIconPath, platformMarker, platformTag, barAlert,
+  plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
 const config = (over: Partial<Config> = {}): Config => normaliseConfig(over);
@@ -373,5 +373,45 @@ describe('pinnedToBottom', () => {
 
   it('follows a feed too short to scroll at all', () => {
     expect(pinnedToBottom({ scrollHeight: 200, clientHeight: 400, scrollTop: 0 })).toBe(true);
+  });
+});
+
+describe('nameSeparator', () => {
+  it('is a colon before something the author said', () => {
+    expect(nameSeparator(message())).toBe(':');
+  });
+
+  it('is a space before something that happened to them', () => {
+    // A /me, and every membership event: the line reads as a sentence.
+    expect(nameSeparator(message({ action: true }))).toBe(' ');
+  });
+
+  it('is nothing at all when there is nothing after it', () => {
+    // A superchat sent with no message, which is ordinary — a dangling colon
+    // is the one thing on screen that would look like a bug rather than a tip.
+    expect(nameSeparator(message({ parts: [] }))).toBe('');
+  });
+});
+
+describe('paidChip', () => {
+  it('is nothing on an ordinary message', () => {
+    expect(paidChip(message())).toBeNull();
+  });
+
+  it('carries the amount as text, in the platform\'s own tier colours', () => {
+    expect(paidChip(message({
+      paid: { amount: '¥5,000', swatch: { bg: 'rgb(194, 24, 91)', ink: '#ffffff' } },
+    }))).toEqual({ text: '¥5,000', bg: 'rgb(194, 24, 91)', ink: '#ffffff' });
+  });
+
+  it('still says the amount when no tier colour came with it', () => {
+    // Colour is the redundant channel here; the amount is the message, so a
+    // missing colour must never be what stops it being drawn.
+    expect(paidChip(message({ paid: { amount: '$2.00', swatch: null } })))
+      .toEqual({ text: '$2.00', bg: '#55607a', ink: '#ffffff' });
+  });
+
+  it('draws no chip when there is no amount to put in it', () => {
+    expect(paidChip(message({ paid: { amount: '   ', swatch: null } }))).toBeNull();
   });
 });

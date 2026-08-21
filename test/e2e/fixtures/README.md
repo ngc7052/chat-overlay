@@ -14,6 +14,13 @@ needs no network and cannot flake on someone else's CDN.
 | `yt-emotes/` | YouTube emoji, and one channel membership emoji | `fonts.gstatic.com/s/e/notoemoji/...` and `yt3.ggpht.com` |
 | `yt-badges/` | a YouTube channel membership badge | `yt3.ggpht.com` |
 
+Superchats and membership events add nothing here on purpose: neither carries
+artwork this overlay draws. A superchat is an amount, an author and some text —
+its tier arrives as an unsigned ARGB integer and is painted, not fetched — and a
+membership event reuses the same `yt-badges/` artwork the member's own badge
+already uses. The only new thing the transcript needed was the real field
+names, which were read off live channels rather than invented.
+
 `fake-chat-server.mjs` serves these at the same routes the real hosts use, and
 the app is pointed at it by the `OVERLAY_*` overrides. The YouTube artwork is
 the exception that proves the rule: YouTube puts the url on the message itself

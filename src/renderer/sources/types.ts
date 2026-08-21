@@ -1,4 +1,4 @@
-import type { MessagePart } from '../util.js';
+import type { MessagePart, Swatch } from '../util.js';
 import type { PlatformName } from '../../main/types.js';
 
 export type MessageKind = 'chat' | 'system' | 'event';
@@ -8,6 +8,21 @@ export interface Badge {
   label: string;
   url: string | null;
   title: string;
+}
+
+/**
+ * What a viewer paid, on the message they paid it on.
+ *
+ * The amount is a string because it is the platform's own formatting — "¥5,000",
+ * "$2.00", "R$ 10,00" — and reformatting a currency the app does not otherwise
+ * understand is how one ends up showing the wrong number. It is also the only
+ * thing here that carries the meaning: the tier colour is a second, redundant
+ * channel that a colour-blind user, or a user over a bright scene, never needs.
+ */
+export interface PaidInfo {
+  amount: string;
+  /** The platform's tier colour, already made safe to paint on; see argbSwatch. */
+  swatch: Swatch | null;
 }
 
 export interface ChatMessage {
@@ -22,6 +37,8 @@ export interface ChatMessage {
   parts: MessagePart[];
   kind: MessageKind;
   action?: boolean;
+  /** Set only on a paid message — a YouTube superchat, and nothing else yet. */
+  paid?: PaidInfo;
   ts: number;
 }
 

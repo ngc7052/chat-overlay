@@ -8,8 +8,8 @@ import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/type
 import { debounce, timeString, type MessagePart } from './util.js';
 import { Feed } from './feed.js';
 import {
-  appearanceVars, badgeRendering, barAlert, emptyHint, pinnedToBottom, platformIconPath,
-  platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
+  appearanceVars, badgeRendering, barAlert, emptyHint, nameSeparator, paidChip, pinnedToBottom,
+  platformIconPath, platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
   type BarAlert, type SourceStatus,
 } from './view.js';
 
@@ -222,9 +222,11 @@ function renderParts(container: HTMLElement, parts: MessagePart[]): void {
 
 /** One message's element. Built, not inserted — the feed decides when. */
 function buildMessage(msg: ChatMessage): HTMLElement {
+  const paid = paidChip(msg);
   const el = document.createElement('div');
   el.className = 'msg' + (msg.kind === 'system' ? ' system' : '') +
-    (msg.kind === 'event' ? ' event' : '') + (msg.action ? ' action' : '');
+    (msg.kind === 'event' ? ' event' : '') + (msg.action ? ' action' : '') +
+    (paid ? ' paid' : '');
   el.dataset['user'] = msg.userLogin || '';
   // The unique one where the platform has one; a removal by author prefers it.
   el.dataset['userid'] = msg.userId || '';
@@ -255,6 +257,22 @@ function buildMessage(msg: ChatMessage): HTMLElement {
     el.appendChild(tag);
   }
 
+  if (paid) {
+    // Drawn like a badge, because that is the mechanism in this feed that is
+    // already known to stay legible over anything: a solid chip, no text
+    // shadow. The tier colour only ever paints the chip — the amount inside it
+    // is text, and the ink is picked to be readable on whatever colour arrived.
+    const amount = document.createElement('span');
+    amount.className = 'amount';
+    amount.textContent = paid.text;
+    amount.style.background = paid.bg;
+    amount.style.color = paid.ink;
+    el.appendChild(amount);
+    // The accent down the side of the message. Painted with a box-shadow, which
+    // takes no space and cannot reflow anything.
+    el.style.setProperty('--paid-accent', paid.bg);
+  }
+
   if (msg.kind === 'chat') {
     for (const b of visibleBadges(msg, config)) {
       if (badgeRendering(b, config) === 'image' && b.url) {
@@ -278,7 +296,7 @@ function buildMessage(msg: ChatMessage): HTMLElement {
 
     const colon = document.createElement('span');
     colon.className = 'colon';
-    colon.textContent = msg.action ? ' ' : ':';
+    colon.textContent = nameSeparator(msg);
     el.appendChild(colon);
   }
 

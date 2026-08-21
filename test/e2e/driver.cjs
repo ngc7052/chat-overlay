@@ -568,6 +568,155 @@ async function scenarioBurst() {
     await q(`(${ORDINALS('brief')}).length`));
 }
 
+/* ----------------------------------------------------------------- rhythm --
+ *
+ * A measurement first and a regression guard second. Coalescing fixed what a
+ * poll's answer *costs*; this is about the shape it arrives in. YouTube hands
+ * over everything said since the last answer, so a busy channel used to land
+ * ten lines in a single frame and then show nothing at all for the rest of the
+ * interval — over and over, at a little under one clump a second.
+ *
+ * The numbers below come out of a real Electron rendering real messages
+ * against a fake channel answered at 1300ms, which is what YouTube asks a busy
+ * chat to wait. Before pacing, at eight messages a second:
+ *
+ *     msgPerWrite 9.6   jumpMedianPx 246   gapMedianMs 1304
+ *
+ * and at thirty a second, 33.1 messages and 883px in one frame — more than the
+ * window is tall, so lines appeared and were scrolled past without ever being
+ * painted once. After:
+ *
+ *     msgPerWrite 1     jumpMedianPx 25    gapMedianMs 84
+ *
+ * which is what a socket has always looked like.
+ */
+
+/** Arm a steady arrival rate on the fake server. */
+function armRate({ n, every, secs, tag }) {
+  return new Promise((resolve, reject) => {
+    const url = `${API}/e2e/rate?n=${n}&every=${every}&secs=${secs}&tag=${tag}`;
+    require('node:http').get(url, (res) => {
+      let body = '';
+      res.on('data', (c) => { body += c; });
+      res.on('end', () => resolve(JSON.parse(body)));
+    }).on('error', reject);
+  });
+}
+
+/** Every write into the feed: when it happened, how much it carried, how far it moved the text. */
+const TIMELINE = `(() => {
+  const c = document.getElementById('chat');
+  const rec = { writes: [] };
+  window.__rhythm = rec;
+  // scrollHeight is read after the feed's own painted() has already forced the
+  // layout for this frame, so it costs nothing extra and is the number that
+  // matters: how far the text under the reader's eye moved in one go.
+  let height = c.scrollHeight;
+  const mo = new MutationObserver((list) => {
+    let n = 0;
+    for (const r of list) n += r.addedNodes.length;
+    const h = c.scrollHeight;
+    const grew = Math.max(0, h - height);
+    height = h;
+    if (n > 0) rec.writes.push([Math.round(performance.now()), n, grew]);
+  });
+  mo.observe(c, { childList: true });
+  rec.stop = () => mo.disconnect();
+  return true;
+})()`;
+
+const STOP_TIMELINE = `(() => { window.__rhythm.stop(); return JSON.stringify(window.__rhythm.writes); })()`;
+
+function describeWrites(writes) {
+  const counts = writes.map((w) => w[1]);
+  const jumps = writes.map((w) => w[2]).filter((v) => v > 0);
+  const gaps = [];
+  for (let i = 1; i < writes.length; i++) gaps.push(writes[i][0] - writes[i - 1][0]);
+  const pct = (a, p) => a.slice().sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * p))];
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  return {
+    messages: sum(counts),
+    writes: writes.length,
+    msgPerWrite: Math.round((sum(counts) / counts.length) * 10) / 10,
+    maxPerWrite: Math.max(...counts),
+    // How far the feed scrolled in the single frame a write was made in.
+    jumpMedianPx: pct(jumps, 0.5),
+    jumpMaxPx: Math.max(...jumps),
+    gapMedianMs: pct(gaps, 0.5),
+    gapP90Ms: pct(gaps, 0.9),
+    gapMaxMs: Math.max(...gaps),
+    spanMs: writes[writes.length - 1][0] - writes[0][0],
+  };
+}
+
+/**
+ * Let a channel talk steadily for a while and record what the feed did.
+ *
+ * The arrivals are driven server-side rather than from here, so what the app
+ * sees is the poll's own lumps and not this harness's HTTP jitter.
+ */
+async function measureRate({ label, perSec, secs }) {
+  const every = Math.round(1000 / perSec);
+  await q(TIMELINE);
+  await armRate({ n: 1, every, secs, tag: 'flow' });
+  await wait(secs * 1000 + 2500);
+  const stats = describeWrites(JSON.parse(await q(STOP_TIMELINE)));
+  console.log(`RHYTHM ${label} (${perSec}/s over ${secs}s) ` + JSON.stringify(stats));
+  return { ...stats, armed: Math.round((secs * 1000) / every), secs };
+}
+
+const POLL_MS = 1300;
+
+async function scenarioRhythm() {
+  check('youtube is connected', await until(
+    `document.querySelectorAll('.msg[data-platform="youtube"]').length > 0`, 25000));
+  // Let the scripted transcript finish, so each rate is measured on its own.
+  await wait(11000);
+
+  const quiet = await measureRate({ label: 'quiet   ', perSec: 1, secs: 8 });
+  const busy = await measureRate({ label: 'busy    ', perSec: 8, secs: 10 });
+  const veryBusy = await measureRate({ label: 'veryBusy', perSec: 30, secs: 8 });
+  console.log('\nRHYTHM SUMMARY ' + JSON.stringify({ quiet, busy, veryBusy }));
+
+  for (const [name, r] of [['quiet', quiet], ['busy', busy], ['veryBusy', veryBusy]]) {
+    // Smoothing that loses messages is not smoothing. The cap is well above
+    // anything a single answer carries here, so every armed line must arrive.
+    check(`${name}: not one message is lost`,
+      r.messages >= r.armed && r.messages <= r.armed + 3,
+      `arrived=${r.messages} armed=${r.armed}`);
+    // The whole point: a lump becomes a trickle. Two per write is a frame that
+    // happened to fall between two due messages, not a clump.
+    check(`${name}: the feed is written a message at a time, not in a lump`,
+      r.maxPerWrite <= 3, `maxPerWrite=${r.maxPerWrite} msgPerWrite=${r.msgPerWrite}`);
+    // Before pacing this was 246px at eight a second and 883px at thirty —
+    // half a window and more than a window, in a single frame.
+    check(`${name}: and never jumps more than a line or two at once`,
+      r.jumpMaxPx <= 80, `jumpMaxPx=${r.jumpMaxPx} jumpMedianPx=${r.jumpMedianPx}`);
+    // Chat that is smooth but late is worse than chat that clumps. The window
+    // is 70% of the interval and capped at a second, so the last message of a
+    // batch is out well before the next batch lands.
+    check(`${name}: and nothing is held past the interval it arrived in`,
+      r.spanMs <= r.secs * 1000 + 2 * POLL_MS,
+      `span=${r.spanMs} armed over=${r.secs * 1000}`);
+  }
+
+  // The reason this matters at all: at rest the feed used to do nothing for
+  // more than a second between clumps, at a little under one a second.
+  check('a busy channel flows rather than strobing',
+    busy.gapMedianMs < POLL_MS / 3, `gapMedianMs=${busy.gapMedianMs}`);
+  check('and a very busy one flows faster still',
+    veryBusy.gapMedianMs < busy.gapMedianMs,
+    `busy=${busy.gapMedianMs} veryBusy=${veryBusy.gapMedianMs}`);
+  // A channel nobody is talking on has no rhythm to smooth, and must not be
+  // made to wait for one: a lone message is painted in the frame it arrives in.
+  check('a quiet channel is not paced at all',
+    quiet.maxPerWrite === 1 && quiet.jumpMaxPx <= 80,
+    JSON.stringify(quiet));
+
+  const held = Number(await q(MSGS));
+  check('and the feed is still holding chat at the end of it', held > 0, `msgs=${held}`);
+}
+
 const stateFile = () => {
   try {
     return JSON.parse(fs.readFileSync(path.join(PROFILE, 'payload-state.json'), 'utf8'));
@@ -638,6 +787,7 @@ async function scenarioDegraded() {
     twitchBadges: document.querySelectorAll('.msg img.badge-img[src*="/twitch-badges/"]').length,
     ggBadges: document.querySelectorAll('.msg img.badge-img[src*="/gg-icons/"], .msg img.badge-img[src*="/files/icons/"]').length,
     chips: document.querySelectorAll('.msg .badge').length,
+    twRoleIcons: document.querySelectorAll('.msg[data-platform="twitch"] img.badge-img[src*="/assets/badge-"]').length,
     broken: Array.from(document.querySelectorAll('.msg img')).filter((i) => i.complete && i.naturalWidth === 0).length,
     text: document.querySelector('.msg[data-platform] .text') ? document.querySelector('.msg[data-platform] .text').textContent : ''
   })`));
@@ -658,8 +808,14 @@ async function scenarioDegraded() {
   check('youtube is untouched — it has no catalogue to lose',
     state.ytEmotes > 0 && state.ytBadgeArt > 0,
     `ytEmotes=${state.ytEmotes} ytBadgeArt=${state.ytBadgeArt}`);
-  // Which is the point of keeping the text chips as a fallback.
+  // Which is the point of keeping the text chips as a fallback: a subscriber or
+  // a VIP badge is per-channel artwork nobody else has, so it becomes text.
   check('twitch badges degrade to text chips', state.chips > 0, `chips=${state.chips}`);
+  // The two roles are the exception, because the app ships those two pictures.
+  // A Twitch moderator normally draws Twitch's own sword; with the mirror down
+  // it draws ours, which is the same symbol, rather than dropping to letters.
+  check('twitch roles fall back to the bundled artwork, not to text',
+    state.twRoleIcons >= 2, `twRoleIcons=${state.twRoleIcons}`);
   check('no broken images left on screen', state.broken === 0, `broken=${state.broken}`);
   check('the message text itself is intact', state.text.length > 0, JSON.stringify(state.text));
 }
@@ -680,6 +836,7 @@ app.whenReady().then(async () => {
     else if (SCENARIO === 'yt-offline') await scenarioYtOffline();
     else if (SCENARIO === 'yt-ended') await scenarioYtEnded();
     else if (SCENARIO === 'burst') await scenarioBurst();
+    else if (SCENARIO === 'rhythm') await scenarioRhythm();
     else if (SCENARIO === 'staged') await scenarioStaged();
     else if (SCENARIO === 'trials') await scenarioTrials();
     else await scenarioDegraded();
@@ -707,6 +864,18 @@ app.whenReady().then(async () => {
     ytCustomEmotes: document.querySelectorAll('.msg img.emote[src*="/yt-emotes/_"]').length,
     ytBadgeArt: document.querySelectorAll('.msg img.badge-img[src*="/yt-badges/"]').length,
     ytChips: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .badge')).map(b => b.textContent),
+    roleIcons: Array.from(document.querySelectorAll('.msg img.badge-img[src*="/assets/badge-"]')).map((i) => ({
+      platform: i.closest('.msg').dataset.platform,
+      file: i.getAttribute('src').split('/').pop(),
+      title: i.title,
+      painted: i.getClientRects().length === 1,
+      decoded: i.naturalWidth > 0 && i.naturalHeight > 0,
+      masked: getComputedStyle(i).webkitMaskImage !== 'none' || getComputedStyle(i).maskImage !== 'none',
+      h: Math.round(i.getBoundingClientRect().height * 10) / 10,
+    })),
+    roleChips: document.querySelectorAll('.msg .badge.moderator, .msg .badge.broadcaster').length,
+    platImgH: Math.round(document.querySelector('.msg img.plat-img').getBoundingClientRect().height * 10) / 10,
+    twArtH: Math.round(document.querySelector('.msg img.badge-img[src*="/twitch-badges/"]').getBoundingClientRect().height * 10) / 10,
     ytNames: Array.from(document.querySelectorAll('.msg[data-platform="youtube"] .name')).map(n => n.textContent),
     // Painted, not merely present: an amount that is in the DOM and invisible
     // is the same as a superchat that was dropped.
@@ -799,8 +968,43 @@ app.whenReady().then(async () => {
       `custom=${state.ytCustomEmotes}`);
     check('youtube membership badge artwork rendered', state.ytBadgeArt >= 1,
       `ytBadgeArt=${state.ytBadgeArt}`);
-    // YouTube publishes no artwork for the named roles, only the name.
-    check('youtube roles degrade to text chips', state.ytChips.includes('MOD') && state.ytChips.includes('HOST'),
+    // Neither YouTube nor GoodGame publishes artwork for a moderator or a
+    // channel owner, so the app draws its own — the same two symbols Twitch
+    // uses, so one glance reads the same on all three platforms.
+    const roles = state.roleIcons;
+    const at = (platform, file) => roles.filter((r) => r.platform === platform && r.file === file);
+    check('a youtube moderator draws the sword, not the letters MOD',
+      at('youtube', 'badge-moderator.svg').length >= 1, JSON.stringify(roles));
+    check('a youtube channel owner draws the camera',
+      at('youtube', 'badge-broadcaster.svg').length >= 1, JSON.stringify(roles));
+    check('a goodgame moderator draws the same sword',
+      at('goodgame', 'badge-moderator.svg').length >= 1, JSON.stringify(roles));
+    check('a goodgame HOST draws the same camera',
+      at('goodgame', 'badge-broadcaster.svg').length >= 1, JSON.stringify(roles));
+    // Present in the DOM proves nothing: the mask bug this project already had
+    // once left every badge visible and every badge the same shape. So: it is
+    // painted, the file it names actually decoded to pixels, and nothing is
+    // drawing it through a mask, which would throw the artwork away.
+    check('every role icon is painted, decoded and unmasked',
+      roles.length >= 4 && roles.every((r) => r.painted && r.decoded && !r.masked),
+      JSON.stringify(roles));
+    // The role each icon claims has to be the role it draws, or a colourblind
+    // user and a screen reader are both told the wrong thing.
+    check('each icon carries the tooltip for the role it draws',
+      roles.every((r) => /mod/i.test(r.title) === (r.file === 'badge-moderator.svg')),
+      JSON.stringify(roles.map((r) => r.file + ':' + r.title)));
+    check('no role is left as a text chip', state.roleChips === 0,
+      JSON.stringify(state.ytChips));
+    // Layout: these reuse the .badge-img rule Twitch artwork already used, so
+    // they must measure the same as it and as the platform logo beside them.
+    // A badge taller than --badge-size would push every line it appears on.
+    check('role icons measure exactly like the badges already on the line',
+      roles.every((r) => r.h === state.twArtH) && state.twArtH === state.platImgH,
+      `roles=${JSON.stringify(roles.map((r) => r.h))} twitch=${state.twArtH} plat=${state.platImgH}`);
+    // The membership badge is the one YouTube does send artwork for, and it is
+    // still that artwork rather than one of ours.
+    check('youtube roles no longer need a text chip, its member badge is unaffected',
+      state.ytChips.length === 0 && state.ytBadgeArt >= 1,
       JSON.stringify(state.ytChips));
     check('youtube nickname present', state.ytNames.includes('@northwind_ada'),
       JSON.stringify(state.ytNames));

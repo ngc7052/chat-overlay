@@ -95,7 +95,7 @@ conversation that remembers where each caller's continuation token got to — an
 serves fixed emote/badge/icon fixtures. **No network, no
 dependence on anyone being live.** A run either passes or has found a bug.
 
-`npm run e2e` runs ten scenarios in a couple of minutes, because the happy path
+`npm run e2e` runs eleven scenarios in a couple of minutes, because the happy path
 is the one thing a real install rarely stays on:
 
 | Scenario | What it puts the app through |
@@ -109,6 +109,7 @@ is the one thing a real install rarely stays on:
 | `--scenario=yt-offline` | a YouTube channel that is not live for the first six seconds — the state neither socket has. Nothing is broken, so it says so in the feed once, waits on its own slow cadence rather than a failure curve, and connects itself the moment a stream starts |
 | `--scenario=yt-ended` | a YouTube stream that ends mid-chat, while the channel page goes on advertising it for a few more seconds — the app must report the loss, decline to re-resolve it in a hot loop, and settle back to "not live" |
 | `--scenario=burst` | one poll answer carrying 300 messages, with a timeout and a ban for lines *inside the same batch* — what a busy YouTube channel does and what neither socket ever produces. Asserts the batch is written to the feed once rather than 300 times, that nothing over the cap is built at all, and that order, moderation, the cap, auto-scroll and message lifetimes all survive the queue — superchats among them, including one the ban takes down. Prints the layout count and the longest main-thread block, which is where the before/after numbers come from |
+| `--scenario=rhythm` | a channel talking steadily at one, eight and thirty messages a second, answered at the 1300ms YouTube asks a busy chat to wait — the shape of a poll rather than its cost. Records every write into the feed: how many messages it carried, how far it moved the text, and how long since the last one. Asserts the feed is written a message at a time rather than in lumps, that nothing is lost or held past its interval, and that a quiet channel is not paced at all. Prints the before/after playout numbers |
 | `--scenario=crash` | a payload whose `main.js` throws — quarantined with the load failure recorded, and the app relaunches without it |
 
 `drop` and `stall` run the two socket channels alone. They exist to test what a
@@ -244,6 +245,22 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
   already running, and the cap already counts it — none of which can be done
   by reading the DOM. That is why removals match against the messages rather
   than against `data-user`.
+- **The queue is also let out across the interval, not all at once.** Batching
+  fixed what a poll's answer costs; it did not touch the shape it arrives in.
+  Measured against a channel answered every 1300ms, a chat running at eight
+  messages a second wrote 9.6 of them into the feed in one frame — a 246px jump
+  under the reader's eye — and then nothing for 1304ms, over and over. At thirty
+  a second it was 883px in one frame, more than a window height, so lines
+  appeared and were scrolled past without ever being painted once. So a source
+  that arrives in lumps passes `paceMs` — the interval the server itself asked
+  for — with each message, and the queue is released across 70% of it, capped at
+  a second. Rules that keep it honest: **a socket passes nothing and is never
+  paced**, and an unpaced arrival flushes the whole queue, so a Twitch message
+  is never held behind somebody else's batch. **A batch the cap had to cut down
+  is not paced either** — it replaces every line on screen however it is drawn,
+  and spreading that is a wipe plus a write every frame throughout. The numbers
+  are in `PACE_FRACTION` and `PACE_MAX_MS`; `--scenario=rhythm` is the
+  measurement.
 - **The feed's scroll position is not `justify-content: flex-end`.** Content
   overflowing the *start* edge of a flex container is not part of its
   scrollable overflow, so with `flex-end` a feed taller than the window had
@@ -275,6 +292,16 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
 - **GoodGame chat icons are plain white SVGs** (`fill="white"`), so they are
   drawn as `<img>`. An earlier version assumed they were fill-less and drew
   them as CSS masks, which turned every badge into the same silhouette.
+- **The moderator and broadcaster badges are shipped in the app**, under
+  `static/assets/`, and drawn for any badge of those kinds that arrives with no
+  artwork of its own — which is every one on GoodGame and YouTube, and every one
+  on Twitch when the badge mirror is down. They match the symbols Twitch uses so
+  the same role reads the same on all three platforms. Do not fetch Twitch's
+  artwork for another platform's message: it is a network dependency for a badge
+  that has nothing to do with Twitch, and `--scenario=degraded` exists because
+  that mirror goes down. They carry their own fills, for the mask reason above;
+  `test/unit/badge-icons.test.ts` holds them to it. `badgeStyle` stays a user
+  choice — `text` still means text for these, and `off` still means nothing.
 - Chat is **read-only and anonymous** on every platform. Do not add anything
   that needs a login. This is why YouTube is read through the endpoint its own
   watch page polls and not through the YouTube Data API: the API needs a key the
@@ -369,10 +396,26 @@ the trigger; ordinary merges run the workflow, see the tag exists, and stop.
      app-region of its own contributes nothing; only an explicit `no-drag`
      subtracts. The settings panel, the resize corner, the scrollbar strip and
      the links in the feed all have to say so.
-  3. **Never resize a drag region on hover.** Chromium recomputes the region,
-     which disturbs the pointer, which drops the hover, which resizes it back —
-     a flicker loop several times a second. Hover may repaint; it may not
-     reflow. The e2e measures the bar cold and hovered to enforce it.
+  3. **Hover may repaint; it may not reflow.** Keep this as the standing
+     discipline for the bar — but know that the flicker it was written for is
+     history, so do not design around it as though it still binds.
+
+     The loop needed a path from *layout* back to *hover state*, and it had one
+     while the reveal was driven by CSS `:hover`: resizing the bar made Chromium
+     recompute the drag region, which disturbed the pointer, which dropped the
+     hover, which resized it back — several times a second. `a008ef1` moved that
+     signal to `src/main/pointer.ts`, which polls the OS cursor against the
+     window's own bounds. Neither of those can be touched by anything the page
+     does, so the loop has nothing left to close. Re-tested when the top bar was
+     redesigned: a prototype that deliberately reflowed the bar on hover — the
+     second dot jumping 81px — produced zero oscillation over four seconds under
+     a real pointer.
+
+     What is left is a cheap invariant worth keeping, not a law of the platform.
+     The e2e measures every element in the bar cold and hovered. It is worth
+     knowing that it did not always: until the top-bar work it compared only the
+     `#bar`, `#grip` and `#status` rects, all of which are flex-filled, so it
+     passed against a prototype that plainly reflowed the bar's interior.
 - **Two YouTube gates answer with a 200 and the wrong page**, so a client that
   meets either sees no error at all — only a channel that is mysteriously never
   live. Both were found by running the real app against real YouTube; neither

@@ -170,6 +170,7 @@ function harness(over: Partial<SourceOptions> & {
   polls?: Array<unknown | Error>;
 } = {}) {
   const messages: ChatMessage[] = [];
+  const paces: Array<number | undefined> = [];
   const removals: RemoveRequest[] = [];
   const statuses: Array<{ state: string; detail: string }> = [];
   const posted: unknown[] = [];
@@ -184,7 +185,7 @@ function harness(over: Partial<SourceOptions> & {
 
   const source = new YouTubeSource({
     channel: 'somechannel',
-    onMessage: (m) => messages.push(m),
+    onMessage: (m, paceMs) => { messages.push(m); paces.push(paceMs); },
     onRemove: (r) => removals.push(r),
     onStatus: (_s, state, detail) => statuses.push({ state, detail }),
     getConfig: () => ({ emotes: true, thirdPartyEmotes: true, exactColors: true }),
@@ -228,7 +229,7 @@ function harness(over: Partial<SourceOptions> & {
   const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 
   return {
-    source, messages, removals, statuses, posted, fetched, advance, settle,
+    source, messages, removals, statuses, posted, fetched, advance, settle, paces,
     timers: () => timers,
     text: () => messages.map((m) => m.parts.map((p) => (p.type === 'emote' ? p.name : p.value)).join('')),
     chat: () => messages.filter((m) => m.kind === 'chat'),
@@ -779,6 +780,27 @@ describe('polling', () => {
     await h.advance(10000);
     expect(h.text()).toContain('two');
     expect((h.posted[1] as { body: { continuation: string } }).body.continuation).toBe('N1');
+  });
+
+  /**
+   * The other half of the pacing in ../../src/renderer/feed.ts. A poll's answer
+   * is a lump of everything said since the last one, so the feed is told how
+   * long it has before the next lump and lets this one out across it. A socket
+   * hands nothing over, and is not paced.
+   */
+  it('hands on the interval the server asked for, and nothing for its own lines', async () => {
+    const h = harness({
+      pages: livePages(),
+      polls: [frame([chatItem('one'), chatItem('two')], 'N1')],
+    });
+    await h.source.connect();
+    await h.advance(1);
+    const paced = h.messages.map((m, i) => [m.kind, h.paces[i]] as const);
+    // The connection line is the app's own, not part of any batch.
+    expect(paced.filter(([kind]) => kind !== 'chat').map(([, p]) => p)).toEqual([undefined]);
+    // Ten seconds is what this answer's continuation asks for, so it is the
+    // window the two messages it carries are spread over.
+    expect(paced.filter(([kind]) => kind === 'chat').map(([, p]) => p)).toEqual([10000, 10000]);
   });
 
   it('carries a deleted message and a banned author back out', async () => {

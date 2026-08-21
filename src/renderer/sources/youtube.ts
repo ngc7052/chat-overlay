@@ -64,9 +64,10 @@ export const YT_SEEN_MAX = 400;
  * The badges the protocol names by icon rather than by artwork.
  *
  * YouTube publishes no badge API and sends no image for these three, only the
- * name — so they map onto the kinds the stylesheet already colours and render
- * as text chips, exactly as GoodGame's roles do. Membership badges are the
- * other kind and do carry their own artwork; see ytBadges.
+ * name — so they map onto the kinds the renderer already knows, exactly as
+ * GoodGame's roles do: moderator and broadcaster get the bundled artwork, the
+ * rest a text chip. Membership badges are the other kind and do carry their own
+ * artwork; see ytBadges.
  */
 export const YT_BADGES: Record<string, { kind: string; label: string }> = {
   OWNER: { kind: 'broadcaster', label: 'HOST' },
@@ -550,8 +551,12 @@ export class YouTubeSource extends BaseSource {
     if (!poll) return this.streamGone();
 
     this.noteAlive();
-    this.handle(poll.actions);
+    // Before the actions, not after: what the messages in this answer are
+    // handed is the wait until the *next* one, which is the interval they have
+    // to be let out across. Reading it afterwards paces every batch against
+    // the interval of the batch before it.
     this.pollMs = poll.timeoutMs;
+    this.handle(poll.actions);
 
     if (poll.stale) return this.tokenStale();
     if (!poll.continuation) return this.streamGone();
@@ -623,7 +628,10 @@ export class YouTubeSource extends BaseSource {
       const item = dig(action, 'addChatItemAction', 'item');
       if (item) {
         const msg = this.toMessage(item);
-        if (msg && this.remember(msg.id)) this.onMessage(msg);
+        // The interval the server itself asked for, handed on so the feed can
+        // let this batch out across it instead of in one frame. It is the
+        // server's number and it moves, so nothing here assumes a value.
+        if (msg && this.remember(msg.id)) this.onMessage(msg, this.pollMs);
         continue;
       }
       const removed = dig(action, 'removeChatItemAction', 'targetItemId');

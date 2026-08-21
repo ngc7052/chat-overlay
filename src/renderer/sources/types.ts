@@ -114,7 +114,13 @@ export interface SourceOptions {
   channelIconBase?: string | null;
   /** Overrides where Twitch's own emote artwork is fetched from; e2e only. */
   emoteBase?: string | null;
-  onMessage(msg: ChatMessage): void;
+  /**
+   * `paceMs` is how long this source expects to wait before its next arrival.
+   * A socket hands messages over as they are said and passes nothing; a poller
+   * arrives in lumps and names the interval between them, which is what lets
+   * the feed let a lump out across it rather than all at once.
+   */
+  onMessage(msg: ChatMessage, paceMs?: number): void;
   onRemove?(req: RemoveRequest): void;
   onStatus?(source: { key: string; platform: PlatformName; channel: string }, state: ConnectionState, detail: string): void;
   getConfig(): { emotes: boolean; thirdPartyEmotes: boolean; exactColors: boolean };

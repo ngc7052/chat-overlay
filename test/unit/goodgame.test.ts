@@ -18,6 +18,12 @@ class FakeSocket implements SocketLike {
 
 function harness(overrides: Partial<SourceOptions> = {}) {
   const messages: ChatMessage[] = [];
+  /**
+   * The pacing hint, which a socket must never send: see the `paceMs` argument
+   * in ../../src/renderer/sources/types.ts. These messages arrive one at a time
+   * as they are said, and holding one back a frame would be a regression.
+   */
+  const paces: Array<number | undefined> = [];
   const removals: RemoveRequest[] = [];
   const statuses: { state: string; detail: string }[] = [];
   const warnings: string[] = [];
@@ -25,7 +31,7 @@ function harness(overrides: Partial<SourceOptions> = {}) {
 
   const source = new GoodGameSource({
     channel: 'annieflowers',
-    onMessage: (m) => messages.push(m),
+    onMessage: (m, paceMs) => { messages.push(m); paces.push(paceMs); },
     onRemove: (r) => removals.push(r),
     onStatus: (_s, state, detail) => statuses.push({ state, detail }),
     getConfig: () => ({ emotes: true, thirdPartyEmotes: true, exactColors: true }),
@@ -39,7 +45,7 @@ function harness(overrides: Partial<SourceOptions> = {}) {
     ...overrides,
   });
 
-  return { source, messages, removals, statuses, warnings, socket: () => socket };
+  return { source, messages, removals, statuses, warnings, paces, socket: () => socket };
 }
 
 describe('channelStatusUrl', () => {
@@ -253,6 +259,9 @@ describe('GoodGameSource.connect', () => {
     expect(h.messages.at(-1)?.parts).toContainEqual({
       type: 'emote', url: 'https://gg/peka.png', name: 'peka',
     });
+    // A socket delivers one message as it is said, so it names no interval and
+    // the feed does not pace it — see ../../src/renderer/feed.ts.
+    expect(h.paces.every((p) => p === undefined)).toBe(true);
   });
 
   it('reports socket errors and retries on close', async () => {

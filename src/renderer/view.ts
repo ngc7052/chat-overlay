@@ -50,9 +50,33 @@ export function platformTag(platform: string): string {
   return PLATFORM_TAGS[platform] ?? 'gg';
 }
 
-/** Real artwork when the catalogue supplied it, a coloured text chip otherwise. */
+/**
+ * Role badges the app ships artwork for.
+ *
+ * A moderator and a channel owner exist on all three platforms, but only Twitch
+ * publishes a picture of them: GoodGame and YouTube send the role and nothing
+ * else, so in icons mode the same role drew a sword on one platform and the
+ * letters MOD on the next. These are bundled rather than borrowed from Twitch's
+ * badge CDN — that would put Twitch's branding on another platform's roles and
+ * make a GoodGame badge depend on a mirror that the degraded scenario exists
+ * because it goes down.
+ *
+ * Only the two roles the user sees everywhere. GoodGame's ADMIN and YouTube's
+ * VER have no counterpart to match and stay text.
+ */
+const BUNDLED_BADGE_ICONS: Record<string, string> = {
+  moderator: '../assets/badge-moderator.svg',
+  broadcaster: '../assets/badge-broadcaster.svg',
+};
+
+/** The artwork to draw a badge with: the platform's own first, ours after. */
+export function badgeIconPath(badge: Badge): string | null {
+  return badge.url ?? BUNDLED_BADGE_ICONS[badge.kind] ?? null;
+}
+
+/** Real artwork where there is any, a coloured text chip otherwise. */
 export function badgeRendering(badge: Badge, config: Config): 'image' | 'chip' {
-  return config.badgeStyle === 'icons' && badge.url ? 'image' : 'chip';
+  return config.badgeStyle === 'icons' && badgeIconPath(badge) ? 'image' : 'chip';
 }
 
 export function visibleBadges(msg: ChatMessage, config: Config): Badge[] {

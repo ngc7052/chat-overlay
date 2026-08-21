@@ -56,7 +56,9 @@ Locked, it vanishes again.
 - **Emotes** — Twitch native, 7TV, BetterTTV, FrankerFaceZ, GoodGame smiles,
   and YouTube's emoji and channel membership emoji.
 - **Badges** — real Twitch artwork (mod, VIP, founder, sub tiers, bits),
-  GoodGame's own chat icons, and YouTube membership badges.
+  GoodGame's own chat icons, and YouTube membership badges. Moderators and
+  channel owners get the same sword and camera whichever platform they are on,
+  since only Twitch publishes a picture of those two.
 - **Superchats and memberships** — a YouTube superchat reads as a chat line
   with the amount on it, in the tier colour YouTube gave it; new members,
   membership milestones and gifted memberships appear as they happen.

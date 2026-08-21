@@ -3,8 +3,8 @@ import { normaliseConfig } from '../../src/main/config.js';
 import type { Config } from '../../src/main/types.js';
 import type { Badge, ChatMessage, ConnectionState } from '../../src/renderer/sources/types.js';
 import {
-  appearanceVars, badgeRendering, emptyHint, messagesToRemove, nameSeparator, paidChip,
-  PIN_SLACK_PX, pinnedToBottom, platformIconPath, platformMarker, platformTag, barAlert,
+  appearanceVars, badgeIconPath, badgeRendering, emptyHint, messagesToRemove, nameSeparator,
+  paidChip, PIN_SLACK_PX, pinnedToBottom, platformIconPath, platformMarker, platformTag, barAlert,
   plainText, shouldDrop, sourceDotClass, statusDots, visibleBadges,
 } from '../../src/renderer/view.js';
 
@@ -91,11 +91,44 @@ describe('platformIconPath', () => {
 describe('badges', () => {
   const withArt: Badge = { kind: 'sub', label: 'SUB', url: 'https://cdn/x', title: 'Sub' };
   const withoutArt: Badge = { kind: 'mod', label: 'MOD', url: null, title: 'Mod' };
+  const ytMod: Badge = { kind: 'moderator', label: 'MOD', url: null, title: 'Moderator' };
+  const ggHost: Badge = { kind: 'broadcaster', label: 'HOST', url: null, title: 'HOST' };
 
   it('draws artwork only when there is artwork and icons are on', () => {
     expect(badgeRendering(withArt, config({ badgeStyle: 'icons' }))).toBe('image');
     expect(badgeRendering(withoutArt, config({ badgeStyle: 'icons' }))).toBe('chip');
     expect(badgeRendering(withArt, config({ badgeStyle: 'text' }))).toBe('chip');
+  });
+
+  it('falls back to the bundled artwork for a role nobody sent a picture of', () => {
+    // YouTube and GoodGame name the role and send no image. Without this they
+    // drew the letters MOD beside a Twitch sword meaning the same thing.
+    expect(badgeIconPath(ytMod)).toContain('badge-moderator.svg');
+    expect(badgeIconPath(ggHost)).toContain('badge-broadcaster.svg');
+    expect(badgeRendering(ytMod, config({ badgeStyle: 'icons' }))).toBe('image');
+    expect(badgeRendering(ggHost, config({ badgeStyle: 'icons' }))).toBe('image');
+  });
+
+  it("prefers the platform's own artwork over the bundled icon", () => {
+    // Twitch publishes both roles itself, and its picture is the authority.
+    const twitchMod: Badge = { kind: 'moderator', label: 'MOD', url: 'https://cdn/mod', title: 'Mod' };
+    expect(badgeIconPath(twitchMod)).toBe('https://cdn/mod');
+  });
+
+  it('has artwork for no other url-less kind', () => {
+    // GoodGame's ADMIN and YouTube's VER have no counterpart to match, so they
+    // stay chips rather than borrowing a symbol that means something else.
+    expect(badgeIconPath({ kind: 'staff', label: 'ADMIN', url: null, title: 'ADMIN' })).toBeNull();
+    expect(badgeIconPath({ kind: 'premium', label: 'VER', url: null, title: 'Verified' })).toBeNull();
+  });
+
+  it('still draws a text chip for a role when the user asked for text', () => {
+    // badgeStyle is a choice, not a capability check: someone who picked text
+    // gets text for the roles we do have artwork for, and nothing when off.
+    expect(badgeRendering(ytMod, config({ badgeStyle: 'text' }))).toBe('chip');
+    expect(badgeRendering(ggHost, config({ badgeStyle: 'text' }))).toBe('chip');
+    expect(visibleBadges(message({ badges: [ytMod, ggHost] }), config({ badgeStyle: 'off' })))
+      .toEqual([]);
   });
 
   it('draws a GoodGame icon as an image like any other badge', () => {

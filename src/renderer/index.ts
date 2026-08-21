@@ -8,7 +8,8 @@ import type { ChatMessage, ConnectionState, RemoveRequest } from './sources/type
 import { debounce, timeString, type MessagePart } from './util.js';
 import { Feed } from './feed.js';
 import {
-  appearanceVars, badgeRendering, barAlert, emptyHint, nameSeparator, paidChip, pinnedToBottom,
+  appearanceVars, badgeIconPath, badgeRendering, barAlert, emptyHint, nameSeparator, paidChip,
+  pinnedToBottom,
   platformIconPath, platformMarker, platformTag, sourceDotClass, statusDots, visibleBadges,
   type BarAlert, type SourceStatus,
 } from './view.js';
@@ -111,6 +112,7 @@ const feed = new Feed<HTMLElement, ReturnType<typeof setTimeout>>({
   detach: (el) => el.remove(),
   fade: (el) => el.classList.add('fading'),
   schedule: (flush) => requestAnimationFrame(flush),
+  now: () => performance.now(),
   // The one layout read per batch, and the only place it happens.
   painted: () => { if (autoScroll) scrollToBottom(); },
   config: () => config,
@@ -275,10 +277,11 @@ function buildMessage(msg: ChatMessage): HTMLElement {
 
   if (msg.kind === 'chat') {
     for (const b of visibleBadges(msg, config)) {
-      if (badgeRendering(b, config) === 'image' && b.url) {
+      const art = badgeIconPath(b);
+      if (badgeRendering(b, config) === 'image' && art) {
         const img = document.createElement('img');
         img.className = 'badge-img';
-        img.src = b.url;
+        img.src = art;
         img.alt = b.title || b.label;
         img.title = b.title || b.label;
         img.addEventListener('error', () => img.replaceWith(chip(b.label, b.kind)), { once: true });
@@ -309,8 +312,12 @@ function buildMessage(msg: ChatMessage): HTMLElement {
   return el;
 }
 
-function addMessage(msg: ChatMessage): void {
-  feed.add(msg);
+/**
+ * `paceMs` is how long the source expects to wait before its next arrival, and
+ * only a polling one names it. See ./feed for what the feed does with it.
+ */
+function addMessage(msg: ChatMessage, paceMs?: number): void {
+  feed.add(msg, paceMs);
 }
 
 function trimMessages(): void {

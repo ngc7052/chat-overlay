@@ -19,8 +19,8 @@
     "e2e:one": "node test/e2e/run.mjs"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.0",
-    "@types/node": "^26.2.0",
+    "@changesets/cli": "^3.0.1",
+    "@types/node": "^26.3.0",
     "@vitest/coverage-v8": "^4.1.11",
     "electron": "^43.4.1",
     "esbuild": "^0.28.2",
